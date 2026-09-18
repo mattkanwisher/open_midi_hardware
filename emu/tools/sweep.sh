@@ -147,6 +147,7 @@ exit 0
 fi
 
 # --- RTF mode -------------------------------------------------------------
+if [ "$MODE" = rtf ]; then
 cat <<EOF
 # How slow can the renderer get before each (block, ring) pair breaks?
 #
@@ -187,6 +188,8 @@ for sh_ in $SHIFTS; do
     done
     printf "\n"
 done
+exit 0
+fi
 
 # --- cliff mode -----------------------------------------------------------
 # -icount's shift is an integer, so the RTF sweep above can only step the

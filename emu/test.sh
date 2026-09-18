@@ -484,7 +484,18 @@ if grep -q "second core         alive" "$OUT/smp.txt"; then
     # The control. If SB never fires, this environment is sequentially
     # consistent and the MP result says nothing whatsoever; the suite must not
     # let that pass silently.
-    if [ "$sbz" -gt 0 ] 2>/dev/null; then
+    #
+    # There is one case where that is expected rather than a failure: a MMU=0
+    # build. With the MMU off ARMv7-A treats every access as Strongly Ordered,
+    # in which no reordering is architecturally possible -- and this is the
+    # measurement that proves it, because the identical binary built MMU=1
+    # fires on 1.6-7.8 % of rounds and built MMU=0 fires on 0 of 200 000.
+    if grep -q "^mmu now             OFF" "$OUT/smp.txt"; then
+        echo "skip the store-buffering control (MMU=0 build: all memory is"
+        echo "     Strongly Ordered, so no reordering is possible and the"
+        echo "     litmus tests cannot say anything. Measured: 0 of $sbr rounds,"
+        echo "     against 1.6-7.8 % for the same binary built MMU=1)"
+    elif [ "$sbz" -gt 0 ] 2>/dev/null; then
         echo "ok   the control fired: $sbz of $sbr store-buffering rounds were"
         echo "     not sequentially consistent, so the harness CAN see reordering"
     else

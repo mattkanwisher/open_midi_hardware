@@ -804,7 +804,12 @@ underruns; a number is underruns in a 4-second paced run.
      6    2.376   20.12    1679    1670    1670    3514     816    1670
 ```
 
-Everything at and below RTF 0.59 is single-digit host jitter. At RTF 1.19
+The `rtf` column is exactly 0.037 x 2^shift across all seven rows, which is the
+arithmetic proof that `-icount shift` is a clean speed dial and that the
+"microseconds" it produces are instruction counts and not time.
+
+Everything at and below RTF 0.59 is host jitter — note that the counts do not
+fall as the fictional machine gets *faster*, which is the giveaway. At RTF 1.19
 every single point fails, and **they fail by almost exactly the same amount**:
 303 dropouts at ring 2, 303 at ring 3, 303 at ring 4, 303 at ring 8. Twenty-one
 milliseconds of audio in flight buys precisely nothing over five.
@@ -1312,6 +1317,20 @@ load-bearing rather than tidiness: **with the MMU off, ARMv7-A treats every
 access as Strongly Ordered**, in which no reordering is architecturally
 possible. A litmus test run with the MMU off is rigged to find nothing.
 
+That is not an argument from the architecture reference manual; it is
+measured. The identical source built both ways, same host, same QEMU
+invocation:
+
+| build | SB rounds | SB both-zero |
+|---|---|---|
+| `make mt32emu` (MMU on, Normal cacheable shareable) | 200 000 | **7 914** |
+| `make MMU=0 mt32emu` (MMU off, Strongly Ordered) | 200 000 | **0** |
+
+So the control is measuring a real property of the memory type and not host
+noise — which is exactly what a control has to demonstrate before its silence
+elsewhere can be believed. `test.sh` recognises the MMU=0 case and skips the
+control rather than failing it.
+
 ### 13.3 The experiment, and its control
 
 Two litmus tests, both across the two cores, both in Normal cacheable shareable
@@ -1430,15 +1449,16 @@ $ make clean && make && make mt32emu && make size
 
 | | text | data | bss | raw `.bin` |
 |---|---|---|---|---|
-| Image without `mt32emu` | 113 232 | 788 | 13 815 892 | **114 020 B** |
-| Image with `mt32emu` | 206 080 | 4 192 | 13 819 020 | **210 272 B** |
-| `mt32emu`'s contribution | **+92 848** | **+3 404** | +3 128 | **+96 252 B** |
+| Image without `mt32emu` | 113 552 | 788 | 13 815 892 | **114 340 B** |
+| Image with `mt32emu` | 206 392 | 4 192 | 13 819 020 | **210 584 B** |
+| `mt32emu`'s contribution | **+92 840** | **+3 404** | +3 128 | **+96 244 B** |
 | `libmt32emu.a` itself | 89 696 | 3 609 | 3 036 | — |
 
-`mt32emu`'s contribution is **identical to § 6's** (+92 848 text, +3 404 data),
-which is the check that nothing in this session changed the synthesiser's cost.
+`mt32emu`'s contribution is **the same as § 6's** to within eight bytes of
+section alignment (+92 848 / +3 404 there, +92 840 / +3 404 here), which is the
+check that nothing in this session changed the synthesiser's cost.
 
-The image itself grew from § 6's 194 512 B to 210 272 B. **All of that is test
+The image itself grew from § 6's 194 512 B to 210 584 B. **All of that is test
 apparatus, and 62 779 B of the total is MIDI test vectors in `.rodata`:**
 
 ```
@@ -1449,8 +1469,8 @@ midi_rtsysex        271      midi_bad          40116
 midi_runstat        802      TOTAL             62779
 ```
 
-So **the product-shaped part of this image is about 147 KB with the
-synthesiser in it**, and a T113 payload would carry no vectors at all. The
+So **the product-shaped part of this image is 147 805 B — about 144 KiB — with
+the synthesiser in it**, and a T113 payload would carry no vectors at all. The
 40 kB `bad` vector alone is a fifth of the `.bin`; it is there because
 `port/host/test.sh` uses those exact bytes and the two suites must answer
 questions about the same data.
