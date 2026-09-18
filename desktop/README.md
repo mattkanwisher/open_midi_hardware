@@ -264,40 +264,185 @@ anything else. Meta events are dropped; they have no wire representation.
 
 ---
 
-## Routing DOSBox into it
+## Driving this from an emulator
 
-**Linux**, DOSBox, DOSBox-X or DOSBox Staging, in `dosbox.conf`:
+Every claim in this section is either something read in the emulator's own
+source, with the file and line, or marked as not verified. **None of it has
+been run**: the container this was written in has no sound device, no ALSA
+sequencer (`/dev/snd` does not exist and neither does `/proc/asound/seq/clients`)
+and no emulator installed. Read it as "this is what the source says the setting
+is", not as "this was tried".
+
+Start our end first, and note the client:port it prints:
+
+```sh
+./desktop/build/mt32-desktop --midi-seq --roms ~/mt32roms &
+aconnect -l              # find our client number; the emulator wants it
+```
+
+### DOSBox Staging
+
+```ini
+[midi]
+mididevice = port
+midiconfig = 128:0        # the client:port mt32-desktop printed
+```
+
+`port` is the default and the current spelling. **`alsa` still works but is
+deprecated** and is silently turned into `port`
+(`src/midi/midi.cpp:915-919`, `SetDeprecatedWithAlternateValue`), together with
+`auto`, `coremidi`, `oss` and `win32`; an older copy of this README told you to
+write `alsa`, which now only works by that compatibility path. `midiconfig`
+takes the ALSA address and its own help text says where to get it — "use the
+Linux command `aconnect -l` to list all open MIDI ports" (`midi.cpp:944-946`).
+Staging's *internal* Munt is `mididevice = mt32` with a `[mt32]` section
+(`midi.cpp:886-889`); choosing `port` is what turns it off, and there is no way
+for both to have the stream.
+
+### DOSBox-X
 
 ```ini
 [midi]
 mididevice = alsa
-midiconfig = 128:0        # the client:port mt32-desktop printed at start-up
+midiconfig = 128:0
 ```
+
+Different program, different spelling: DOSBox-X looks the name up in a list of
+handlers and the ALSA one answers to `alsa` (`src/gui/midi_alsa.h:121`). Both
+keys are read at `src/gui/midi.cpp:613-614`. `midiconfig` is parsed by
+`parse_addr()` (`midi_alsa.h:100-118`): `client:port`, or a leading `s` for
+"whoever subscribes". It also ships `midi_mt32.h`, so `mididevice = mt32` is
+its built-in Munt.
+
+### ScummVM
+
+```sh
+SCUMMVM_PORT=128:0 scummvm -e alsa --native-mt32 <game>
+```
+
+`-e` is `--music-driver` (`base/commandLine.cpp:139`, `:786`) and the ALSA
+plugin's id is `alsa` (`backends/midi/alsa.cpp:346-348`). `SCUMMVM_PORT`
+overrides whatever the configuration says, and the code warns that it is doing
+so (`alsa.cpp:448-456`) — which makes it the least ambiguous way to point
+ScummVM at us. **`--native-mt32` matters** (`commandLine.cpp:177`, `:924`): it
+tells ScummVM the thing on the other end really is an MT-32, so it stops
+converting the MT-32 data to General MIDI. `-e mt32` is ScummVM's own built-in
+Munt and is the thing you are choosing *not* to use.
+
+### MAME, and the X68000
+
+MAME emulates the Sharp CZ-6BM1 MIDI board and wires it to real host MIDI
+ports: the device's `device_add_mconfig` creates `MIDI_PORT(config, "mdout",
+midiout_slot, "midiout")` (`src/devices/bus/x68k/x68k_midi.cpp:20-27`), and the
+`midiout` image device hands its filename straight to the OSD layer —
+`m_midi = machine().osd().create_midi_output(filename())`
+(`src/devices/imagedev/midiout.cpp:60-67`), so the argument is **a host MIDI
+port name, not a file**. The x68000 driver offers the card as the slot option
+`x68k_midi` (`src/mame/sharp/x68k.cpp:920`) in either of two expansion slots
+tagged `exp1` and `exp2` (`src/mame/sharp/x68k.h:64`):
+
+```sh
+mame x68000 -exp1 x68k_midi -midiout "mt32-t113"      # not run here
+```
+
+The MIDI back end is chosen with `-midiprovider`
+(`src/osd/modules/lib/osdobj_common.cpp:151`). The exact spelling of the
+`-midiout` option in a machine that also has a `midiin` device is **not
+verified** — MAME derives image-device option names from the device's instance
+name, which is `midiout` (`src/devices/imagedev/midiout.h:48-51`), but nothing
+here ran MAME to confirm it is not `-mdout` or numbered.
+
+### 86Box
+
+In the `.cfg`, `midi_device = system_midi` selects the host MIDI output
+(`src/config.c:912-914`; the internal name is `system_midi` on everything but
+Windows, where it is `windows_midi` — `src/include/86box/midi.h:98-107`). Which
+host port it opens is a *device* setting: `midi` in the `[System MIDI]` section
+(`src/sound/midi_rtmidi.cpp:90` and `:231-244`), an index into the ports RtMidi
+enumerates. 86Box's own Munt is `mt32`, `mt32_new` or `cm32l`
+(`src/sound/midi_mt32.c:463-492`), and picking `system_midi` is how you get the
+stream out to us instead.
+
+### PCem — needs `snd-virmidi`
+
+PCem does not use the ALSA *sequencer* at all. It opens an ALSA **rawmidi**
+device by card/device/sub: `snd_rawmidi_open(NULL, &midiout, "hw:%i,%i,%i", …)`
+(`src/midi_alsa.c:100-107`), with the index coming from the config key `midi`.
+Our `--midi-seq` port is a sequencer client and cannot be opened that way, so
+the route is a virtual raw port in between:
+
+```sh
+sudo modprobe snd-virmidi                  # gives hw:N,0,0 .. and seq clients
+aconnect -l                                # find "Virtual Raw MIDI" client
+aconnect <virmidi client>:0 <our client>:0
+# then point PCem at the matching hw: device in its MIDI settings
+```
+
+### px68k — no MIDI out at all
+
+The obvious X68000 emulator on Linux cannot do this. `px68k` emulates the
+CZ-6BM1 (`x68k/midi.c` is headed "MIDI Board (CZ-6BM1) emulator") and sends
+every message through the Win32 MME calls it inherited from WinX68k —
+`midiOutOpen`, `midiOutShortMsg`, `midiOutLongMsg` — and its own replacement
+for those calls does nothing: `midiOutOpen` returns `!MMSYSERR_NOERROR`, which
+`MIDI_Init()` turns into `hOut = 0`, and `midiOutShortMsg` is `(void)dwMsg;
+return MMSYSERR_NOERROR;` (`win32api/fake.c:101-129`, `x68k/midi.c:318-326`,
+checked at `hissorii/px68k` master). Its `juliet.c`, which in WinX68k talks to
+a real ROMEO/Juliet card, is `#if 0` from top to bottom. **For an X68000 stream,
+use MAME.** Whether some fork of px68k has added MIDI out is not something this
+session could check.
+
+### XM6 and XM6 TypeG — not verified
+
+Windows-only, and the sources were not reachable from here. Search results
+describe XM6 TypeG as the most complete X68000 emulator and confirm it emulates
+a MIDI board, but **no claim about its MIDI-out configuration appears here
+because none could be read**. If you are on Windows, the shape to expect is an
+MME port selection plus a loopback driver.
+
+---
+
+## From an emulator to an A/B: capture once, render many
+
+Listening to a game through us and then through something else is not a
+comparison, because the two runs are not the same MIDI. The stream a game
+emits depends on when the emulator's timer fired; play it twice and you have
+two different streams. So capture it **once**, and render that one file through
+everything offline.
+
+Two ways to capture, and they can both be done while you play:
+
+**1. The emulator's own capture.** DOSBox Staging records MIDI output to a
+`.mid` on Ctrl+Alt+F6 (`src/capture/capture.cpp:656-660`, binding name
+`caprawmidi`), writing an SMF whose delta times are `PIC_Ticks`, i.e.
+milliseconds (`src/capture/capture_midi.cpp:28-93`). DOSBox-X has the same
+feature under the same binding name but **with no default key** —
+`MAPPER_AddHandler(CAPTURE_MidiEvent, MK_nothing, 0, "caprawmidi", "Record MIDI
+output")` (`src/hardware/hardware.cpp:2300`) — so bind it in the mapper or use
+the menu item; it writes `.mid` through `OpenCaptureFile("Raw Midi", ".mid")`
+(`hardware.cpp:2051-2058`). This captures whatever the game sends whether or
+not anything is listening.
+
+**2. ALSA, on the way past.** A sequencer source can have two destinations, so
+you can hear it and record it at the same time:
 
 ```sh
 ./desktop/build/mt32-desktop --midi-seq --roms ~/mt32roms &
-dosbox -conf dosbox.conf
+aconnect -l                                   # find both client numbers
+arecordmidi -p <emulator client>:0 capture.mid &
+aconnect <emulator client>:0 <our client>:0
+# play the game; Ctrl-C arecordmidi when the passage is done
 ```
 
-Then set the game to "Roland MT-32" or "Roland LAPC-I", not "General MIDI".
+`aseqdump -p <emulator client>:0` in place of `arecordmidi` gives you a
+readable log of the same stream, which is how you find out whether a game is
+really sending MT-32 sysex or has decided you are a General MIDI module.
 
-**macOS**:
+Then render the capture through every engine you have:
 
-```ini
-[midi]
-mididevice = coremidi
-midiconfig = mt32-t113
+```sh
+./desktop/ab.sh capture.mid --roms ~/mt32roms --out ~/ab
 ```
-
-**Anywhere, without a sequencer** — DOSBox-X can write raw MIDI to a device
-file, which our FIFO is happy to be:
-
-```ini
-[midi]
-mididevice = none
-```
-…and instead run DOSBox under a wrapper that pipes its MIDI out into
-`--midi-fifo /tmp/mt32.midi`. The sequencer route is much less trouble.
 
 ---
 
@@ -548,11 +693,59 @@ a change rather than as noise.
 
 ---
 
+## The A/B run: how far are we from Munt?
+
+```sh
+./desktop/ab.sh                                     # no ROMs: runs, proves little
+./desktop/ab.sh capture.mid --roms ~/mt32roms --out ~/ab
+```
+
+`conform.sh` asks "is it the same program on every platform?". This asks a
+different question — "is it the same *sound* as somebody else's renderer?" —
+and it takes one MIDI file (an SMF, or a raw byte capture) and renders it
+through up to four legs, which are **not equal evidence**:
+
+| leg | what it is | evidence |
+|---|---|---|
+| `ours` | `mt32-desktop`: parser, render loop, ring, block scheduler, engine | what we ship |
+| `ref-seam` | `desktop/build/ab/ab_ref`: events straight into the engine at sample-exact times, none of our code above it | isolates our code from the library's |
+| `munt-smf2wav` | **Munt's own `mt32emu-smf2wav`**, built out of `bench/vendor/munt` | the one that answers the question — **needs real ROMs** |
+| `munt-orig` | the same on the original `.mid` rather than the normalised one | catches our SMF reader disagreeing with libsmf |
+
+It prints frames, peak, RMS, onset and SHA-256 per leg, and for each pair: how
+many samples differ and from where (`conform/compare.py`'s own comparison, not
+a second copy of it), the RMS of the difference in LSB and dBFS, how far the
+onsets are apart, and the shift that best explains the difference — because "the
+same audio 17 ms late" and "different audio" are different findings.
+
+**Two modes, and the difference matters.** A raw byte capture has no time in
+it, so every leg is handed the whole stream before the first frame and they
+must agree *exactly*; `ab.sh` asserts that and exits non-zero if they do not.
+An SMF has time in it, and our leg is paced by a wall clock while the reference
+legs are paced by arithmetic, so they will not agree sample for sample and it
+does not assert they do. What it does instead is quantify the gap.
+
+**Without ROMs it still runs end to end**, on the fabricated images of
+`emu/src/engine_mt32emu_fake_roms.cpp`, and says in its own output that what it
+compared is not MT-32 audio and proves nothing about how the product sounds.
+Munt's renderer cannot join in at all there: it loads ROMs from files and
+hashes them, and there is no fabricated-ROM path into it.
+
+What `ab.sh` produces, for a user with ROMs and speakers, is a directory of
+WAVs of the same passage rendered by us and by Munt. Listening to those two
+files is evidence this project has never had —
+[FINDINGS.md § 10](FINDINGS.md#10-the-ab-rig-how-do-we-compare-with-munt).
+
+---
+
 ## Licences
 
 - **miniaudio** (`vendor/miniaudio/`) — public domain (Unlicense) or MIT-0, at
   your choice. Vendored whole, with its licence text, so this builds on a clean
   machine with no package manager involved.
+- **`mt32emu-smf2wav`** — GPL v3 or later, and it is Munt's, not ours.
+  `ab.sh` builds it out of `bench/vendor/munt` into `desktop/build/ab` and runs
+  it as a separate program; nothing of it is linked into anything here.
 - **`mt32emu`** — LGPL 2.1. This program links it statically when it is built
   in, which carries the usual obligations; the boundary is one file,
   `port/host/engine_mt32emu.cpp`, and the library is built from the unmodified

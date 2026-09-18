@@ -321,6 +321,7 @@ says every implementation of the seam must pass the same assertions on them.
 |---|---|---|
 | **OBS-9** | `min_queued` SHOULD be logged every few seconds on the target | `[read]` |
 | **OBS-10** | All implementations of the seam MUST agree on every counter for the same input | `[host]` `[qemu]` — verified across five builds by `desktop/conform.sh`: host x86-64, armv7 under `qemu-user`, the same with `-ffp-contract=off`, bare-metal Cortex-A7, and the desktop build. Every counter agreed on every run |
+| **OBS-13** | Audio MUST also match an **independent front end** — one built on the engine seam alone, sharing none of the parser, render loop or ring. Four builds of the same code cannot catch a bug they share | `[measured]` `desktop/ab.sh` — currently identical, sample for sample |
 | **OBS-11** | They MUST also render **byte-identical PCM** for the same input. This is a stronger test than the counters and it is cheap | `[measured]` — byte-identical across all five on the fake engine; the one divergence found was floating-point contraction, now fixed by flag (§ 9 trap 14). **Still unverified: bare-metal ARM against x86 on non-silent *synthesiser* output**, because the bare-metal image's MIDI vectors are compiled in and do not yet include a stream that makes the fake-ROM engine sound |
 
 ---

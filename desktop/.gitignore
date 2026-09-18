@@ -11,3 +11,7 @@
 # rule is still what we want; this line is only here so that the vendor
 # negation above cannot accidentally resurrect one.
 *.wav
+
+# abdiff.py imports conform/compare.py; belt and braces against a byte-cache
+# landing in a committed directory (it also sets sys.dont_write_bytecode).
+__pycache__/

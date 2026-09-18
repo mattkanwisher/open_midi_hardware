@@ -43,6 +43,23 @@ remapping question — one `xfel read32 0x03006228` on arrival.
 | BSS138 ×2, and a 74LVC1G07 (non-inverting open-drain — **not** the 1G06) | The daughterboard's 5 V→3.3 V MIDI shifter and the THRU driver. Lets both front ends be breadboarded before a carrier exists | $0.30 |
 | MIDI DIN breakout or a game-port MIDI cable | Feed it from a real DOS machine | $10 |
 
+## 3b. Driving it from a retro machine, for listening tests
+
+Not a purchase, but it belongs beside them: the intended way to hear this
+against other MT-32 implementations is to drive it from an emulator over real
+MIDI. Established 2026-09-18 by reading each project's own source;
+`desktop/README.md` has the detail and the citations.
+
+| | |
+|---|---|
+| **X68000** | **Use MAME** (`-exp1 x68k_midi`), **not px68k.** px68k emulates the CZ-6BM1 board, but its Win32 shim makes `midiOutOpen` return failure and `midiOutShortMsg`/`midiOutLongMsg` no-ops — so on Linux **it discards every MIDI byte**. Confirmed in `win32api/fake.c` |
+| **DOSBox Staging** | `mididevice = port` plus `midiconfig = <client:port>`. **Not `alsa`** — that value is deprecated and silently rewritten. It can also capture the stream to an SMF (Ctrl-Alt-F6), which is the cleanest feed into the A/B rig |
+| **DOSBox-X** | `mididevice = alsa` here — a different project with a different parser. It captures too, but the capture key is unbound by default |
+| **ScummVM** | `-e alsa` with `SCUMMVM_PORT=<client:port>` |
+
+Capture the stream once, then render it offline with `desktop/ab.sh`. A live A/B
+is not repeatable — see `docs/PLAN.md` § 0.5.
+
 ## 4. Not purchasable
 
 **MT-32 or CM-32L ROM dumps.** Roland's, and the gate cannot be closed without

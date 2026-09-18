@@ -117,6 +117,21 @@ tidy:
    having as a separate rule because it has already caught something the counter
    contract could not: a floating-point contraction difference that made ARM and
    x86 disagree by 1 LSB (§ 4, and `port/PORTING.md` § 4.2).
+
+   **Rule 2 has a sibling, added 2026-09-18.** All four builds are the same code,
+   so a mistake they *share* is invisible to them. `desktop/ab.sh` renders the
+   same events through an **independent front end** — one that uses the engine
+   seam directly and none of the MIDI parser, the render loop or the ring — and
+   compares the audio. They currently agree sample for sample. It is the only
+   check that can catch a bug living in the shared code itself, and it is free.
+
+   That rig also settled something worth knowing before anyone proposes "play it
+   through both and listen": **two real-time renderings of the same file cannot
+   be subtracted.** Three identical runs gave two bit-identical results and one
+   differing on 16.9 % of samples, because an event landed in a different
+   128-frame block — the MIDI source is paced by the clock and the render loop
+   by the device. Offline, event-exact rendering is the only repeatable
+   comparison.
 3. **Keep the lower layer thin, because it is the expensive one.** Every function
    added below the seam is a function that can only be debugged with a scope and
    a board in hand. When there is a choice, push logic upward.

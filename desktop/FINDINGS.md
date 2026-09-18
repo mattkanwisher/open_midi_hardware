@@ -749,3 +749,220 @@ warns twice by line number, and is overridden by `--block 512`.
 call (section 6.4), so a `volume` key would be a key that silently does
 nothing, which is worse than no key. It should go in at the same time as the
 seam call.
+
+---
+
+## 10. The A/B rig: how do we compare with Munt?
+
+The question asked was "hook this up to an emulator like an X68000 so we can
+see how we sound against other implementations", with a follow-up that is the
+better half of it: "see if any emulators can hook directly into a MIDI device
+to make a cleaner test." Two answers follow, and the second is the one that
+outlives the session.
+
+**Nothing here has been heard.** There are no MT-32 ROMs in this repository and
+there never will be, `mt32emu` verifies them by SHA-1, and this container has no
+sound device: `/dev/snd` does not exist, `/proc/asound/seq/clients` does not
+exist, and `aconnect`, `aseqdump`, `arecordmidi`, `dosbox` and `mame` are not
+installed. So no statement below is about how anything sounds, and none of the
+emulator settings in README.md § "Driving this from an emulator" was executed —
+they are readings of those emulators' source, with line numbers.
+
+### 10.1 Why a live hook-up is the wrong test, measured
+
+The intuition behind "a cleaner test" is right, and it can be shown rather than
+argued. The same binary, the same SMF, the same flags, three consecutive runs
+through the null device:
+
+```sh
+for i in 1 2 3; do ./desktop/build/mt32-desktop --audio null \
+    --engine mt32emu-fakerom --midi-smf timed.mid --rate 48000 --ring 8 \
+    --status-ms 0 --seconds 4.400 --tap-wav rep/run$i.wav; done
+python3 desktop/ab/abdiff.py rep --ref run1
+```
+
+```
+  run1    211200    48000     18600   -4.92  -14.88     0.5174  3c3b237ba1c9f62a
+  run2    211200    48000     18573   -4.93  -14.86     0.5174  66ef9a480535612a
+  run3    211200    48000     18600   -4.92  -14.88     0.5174  3c3b237ba1c9f62a
+
+-- run1  vs  run2   (422400 samples in common, 4.400 s)
+   71476 of 422400 samples differ (16.9214%), first at sample 116736 ...
+   onset: run2 starts 0 samples (0.00 ms) at the same sample
+   difference RMS 3905.4 LSB ( -18.48 dBFS); reference RMS 5908.0 LSB
+-- run1  vs  run3
+   IDENTICAL: every one of 422400 samples
+```
+
+Two of three runs were bit-identical and the third was not. The first sample
+that differs is 116736, which is frame 58368, which is 1.216 s — the second
+note-on in that file is at 1.200 s. Nothing about the synthesis changed; the
+event landed in a different 128-frame block because the MIDI source is paced by
+`mtp_time_us64()` (`src/desktop_midi_smf.c:315-316`) and the render loop is
+paced by the audio device. **A real-time rendering of a game's MIDI is not
+reproducible to the sample, so two real-time renderings cannot be subtracted.**
+Capture the stream once and render it offline; that is what `ab.sh` does.
+
+The same effect, measured against a sample-exact renderer of the identical
+events, is a **17.33 ms** head start for the offline leg:
+
+```
+  ours        211200    48000     18600   -4.92  -14.88     0.5174
+  ref-seam    211200    48000     18570   -4.93  -14.86     0.5001
+   onset: ref-seam starts 1664 samples (17.33 ms) earlier
+```
+
+17.33 ms is 832 frames, and the ring in that run was 8 blocks of 128 frames =
+1024 frames = 21.3 ms. An event that arrives at wall-clock *t* is put into
+audio that will not be *played* until up to a ring later, so the tap records it
+late by most of a ring. That is the port behaving as designed, not a defect —
+but it is a reason the tap and a file renderer can never be compared without
+saying so.
+
+### 10.2 What was built
+
+Four files, all under `desktop/`:
+
+| | |
+|---|---|
+| `ab.sh` | the driver: prepare, build, render every leg, compare, and say what the run did not show |
+| `ab/midiprep.py` | one MIDI input (SMF or raw bytes) → `.evt` for our reference, a normalised `.mid` for Munt's, `.raw` for `--midi-raw`; all carrying the same events on a 10 µs grid |
+| `ab/ab_ref.cpp` | the reference front end: events straight into the engine, sample-exact, with none of `mtp_midi_parser.c`, `mtp_render.c`, the ring or `desktop/src` |
+| `ab/abdiff.py` | the comparison: imports `conform/compare.py`'s `pcm()` and `compare_pair()` rather than reimplementing them, and adds level, difference RMS, onset and a lag search |
+
+`ab.sh` writes only inside `desktop/build/ab`, including the out-of-source
+CMake build of Munt, so the rule `conform.sh` keeps — nothing outside
+`desktop/` is written to — still holds.
+
+**`bench/vendor/munt` does ship a reference renderer**, which was the thing
+worth checking before writing one: `mt32emu_smf2wav`, "a console application
+intended to facilitate conversion a pre-recorded Standard MIDI file (SMF) to a
+WAVE file using the mt32emu library" (`bench/vendor/munt/README.md`). It builds
+here:
+
+```
+$ cmake -S bench/vendor/munt -B desktop/build/ab/munt -DCMAKE_BUILD_TYPE=Release \
+        -Dmunt_WITH_MT32EMU_QT=FALSE -Dmunt_WITH_MT32EMU_SMF2WAV=TRUE
+-- Found GLIB2: /usr/lib/x86_64-linux-gnu/libglib-2.0.so (found suitable version "2.80.0",
+   minimum required is "2.32")
+$ cmake --build desktop/build/ab/munt -j8
+[100%] Built target mt32emu-smf2wav
+$ ./desktop/build/ab/munt/mt32emu_smf2wav/mt32emu-smf2wav -m /nonexistent -i mt32 -f \
+      -o x.wav -a 2 -x 32 --record-max-start-silence -1 --record-max-end-silence -1 \
+      --record-max-la32-end-silence -1 -e 96000 stream.mid
+Error reading contents of ROM dir.
+Munt MT32Emu MIDI to Wave Conversion Utility. Version 1.9.3
+Using Munt MT32Emu Library Version 2.8.3, libsmf Version 1.3 (with modifications)
+```
+
+That is the whole flag set `ab.sh` uses, and it parses: the only complaint is
+the ROM directory. **It has never been run to completion, here or anywhere in
+this project, because that needs ROMs.** `-a 2` is `AnalogOutputMode_ACCURATE`,
+matching what both of our engines open the synth with
+(`port/host/engine_mt32emu.cpp:133`); the three `--record-max-*-silence -1` are
+not decoration — the default is 0, which *trims* leading silence and would
+shift the whole file against ours.
+
+Because smf2wav cannot exist without ROMs, the no-ROM ladder has one more rung:
+`ab_ref`, which drives the same engine seam with none of our code above it. It
+is weaker evidence than smf2wav and `ab.sh` says so in its own header. When
+ROMs exist, believe smf2wav.
+
+### 10.3 What the rig found, with no ROMs
+
+```
+$ ./desktop/ab.sh
+  leg         frames     rate      peak  peak dB    rms dB    onset s  sha256/16
+  ours         96000    48000      9300  -10.94  -12.58     0.0001  7b48a146ce2cf1c1
+  ref-seam     96000    48000      9300  -10.94  -12.58     0.0001  7b48a146ce2cf1c1
+
+-- ours  vs  ref-seam   (192000 samples in common, 2.000 s)
+   IDENTICAL: every one of 192000 samples
+RESULT: every leg rendered the same samples as ours.
+```
+
+On the `voice` vector delivered at t=0, **our whole pipeline and a front end
+that shares none of it produce the same 192 000 samples**. That is worth having:
+`conform.sh` compares four builds of the *same* code against each other, and
+could not have caught a mistake that all four share. This compares that code
+against code that does not contain it — the parser, the ring, the block
+scheduler and the timestamp arithmetic are all in one leg and none of the
+other, and the audio is identical anyway.
+
+It is also, on its own, nearly the weakest possible statement about the
+product: both legs ran the fabricated ROMs of
+`emu/src/engine_mt32emu_fake_roms.cpp`, a control ROM that is mostly zeroes and
+a PCM ROM that is entirely zeroes. Every line of mt32emu ran; the sound is
+meaningless. `ab.sh` prints that paragraph at the end of every ROM-less run so
+that an output pasted into a chat window carries its own caveat.
+
+### 10.4 Which emulators can hand MIDI to an external device
+
+Read from each project's own source at `raw.githubusercontent.com`, on the
+dates in this document. `[read]` = read the code, file and line given. `[search]`
+= a search summary, not verified. Nothing in this table was executed.
+
+| emulator | external MIDI out? | how | built-in Munt? | records MIDI? | evidence |
+|---|---|---|---|---|---|
+| **DOSBox Staging** | yes | `[midi] mididevice = port`, `midiconfig = <client:port>`; `alsa` deprecated → `port` | yes, `mididevice = mt32` | yes, `.mid`, Ctrl+Alt+F6 | `[read]` `src/midi/midi.cpp:867-946`, `src/capture/capture.cpp:656-660`, `src/capture/capture_midi.cpp:28-93` |
+| **DOSBox-X** | yes | `[midi] mididevice = alsa`, `midiconfig = <client:port>` or `s` | yes (`src/gui/midi_mt32.h`) | yes, `.mid`, binding `caprawmidi`, **no default key** | `[read]` `src/gui/midi.cpp:613-614`, `src/gui/midi_alsa.h:100-121`, `src/hardware/hardware.cpp:2051-2058`, `:2300` |
+| **ScummVM** | yes | `-e alsa` (`--music-driver`), `SCUMMVM_PORT=<client:port>`, **`--native-mt32`** | yes, `-e mt32` | not found | `[read]` `base/commandLine.cpp:139,177,786,924`, `backends/midi/alsa.cpp:346-348,448-456` |
+| **MAME (x68000)** | yes | `-exp1 x68k_midi`, then the `midiout` image device takes a **host port name**; back end via `-midiprovider` | n/a | not checked | `[read]` `src/devices/bus/x68k/x68k_midi.cpp:20-27`, `src/devices/imagedev/midiout.cpp:60-67`, `src/mame/sharp/x68k.cpp:920`, `x68k.h:64`, `src/osd/modules/lib/osdobj_common.cpp:151` |
+| **86Box** | yes | `midi_device = system_midi`; port index is `midi` under `[System MIDI]` | yes: `mt32`, `mt32_new`, `cm32l` | not checked | `[read]` `src/config.c:912-914`, `src/include/86box/midi.h:98-107`, `src/sound/midi_rtmidi.cpp:90,231-244`, `src/sound/midi_mt32.c:463-492` |
+| **PCem** | yes, but **rawmidi only** | `snd_rawmidi_open(…, "hw:c,d,s")`; needs `snd-virmidi` to reach a sequencer client | not checked | not checked | `[read]` `src/midi_alsa.c:100-107` |
+| **px68k** | **no** | `midiOutOpen` returns failure and `midiOutShortMsg` is a no-op in its own Win32 shim | n/a | no | `[read]` `win32api/fake.c:101-129`, `x68k/midi.c:318-326`, `x11/juliet.c` (`#if 0` throughout) |
+| **XM6 / XM6 TypeG** | probably (Windows MME) | **not verified** | — | — | `[search]` only; sources not reachable from here |
+
+Three things in that table are worth pulling out.
+
+**The X68000 route is MAME, not px68k.** px68k emulates the CZ-6BM1 MIDI board
+faithfully enough to have module-type resets for MT-32, CM-32L, CM-64 and
+CM-300 in its source — which is itself good evidence that X68000 software
+expected those modules — and then throws every byte away, because the Linux
+port's replacement for the Win32 MME calls does nothing. MAME's `x68k_midi`
+device, by contrast, is wired to `midiout`, which hands its argument to
+`osd().create_midi_output()`: a host port.
+
+**This README was wrong about DOSBox Staging.** It said `mididevice = alsa`.
+Staging's current source marks `alsa` (and `auto`, `coremidi`, `oss`, `win32`)
+deprecated and rewrites them to `port`, which is now the default
+(`src/midi/midi.cpp:915-919`). It still works; it is no longer the spelling.
+
+**Two emulators will write the capture for you**, which is the cleanest route
+into `ab.sh`: DOSBox Staging on Ctrl+Alt+F6 and DOSBox-X under the same binding
+name. Both write an SMF whose delta times are `PIC_Ticks` — milliseconds — so
+the capture is quantised to 1 ms before anything of ours sees it. That is
+coarser than `midiprep.py`'s 10 µs grid and there is nothing to be done about
+it; it is also finer than the 17 ms our own real-time path adds.
+
+### 10.5 What did not work, and what is still unknown
+
+- **`api.github.com` is refused for every repository but this one** ("GitHub
+  access to this repository is not enabled for this session"), so there was no
+  way to list a directory. `raw.githubusercontent.com` serves files fine, so
+  every path above was found by guessing filenames and checking the HTTP
+  status. Several guesses were wrong before the right one: DOSBox-X's MIDI code
+  is `src/gui/midi.cpp`, not `src/hardware/midi.cpp`; PCem's is
+  `src/midi_alsa.c` on branch `main`.
+- **`www.vitormach.dev` is blocked by the egress proxy** (`EGRESS_BLOCKED`).
+  That was the one search result that looked like it documented XM6 TypeG's
+  MIDI routing step by step, so the XM6 row stays `[search]`.
+- **No ALSA anywhere**, so not one line of the `aconnect`/`arecordmidi`
+  plumbing in README.md has been executed. It is written from the emulators'
+  source and from the ALSA tools' documented behaviour, and should be treated
+  as `[inferred]` until somebody runs it.
+- **`numpy` is not installed**, which is why `abdiff.py` is pure Python and why
+  its lag search is a coarse-to-fine search over a subsampled window rather
+  than a correlation. On a held note that beats against another, the lag is
+  genuinely ambiguous — the search reported 78 ms where the onsets say 17 ms —
+  so the onset line is printed as well and the code says to believe it.
+- **`ab_ref` is not the parser.** It takes framed events from `midiprep.py` and
+  therefore has no sysex cap, no orphan-byte accounting and no truncation. A
+  stream that exercises those limits — `conform/vectors.py`'s `bad`, whose
+  40 000-byte sysex is larger than `MTP_SYSEX_MAX` (32768) — will be rendered
+  differently by the two legs, and that difference is the parser working.
+  `midiprep.py` prints a warning when it sees such a sysex. `conform.sh`
+  remains the place those limits are tested.
+- **Unknown, and it takes ROMs to settle:** whether `ours` and `munt-smf2wav`
+  agree at all, and if not, by how much. Everything in this section is about a
+  synthesiser running on zeroes.
