@@ -57,6 +57,20 @@ unsigned mtp_audio_queued(void);
  * Under an RTOS this is a semaphore take; in a superloop it is WFI in a loop.
  * timeout_us == 0 means poll once and return immediately.
  * Returns MTP_OK if a block is now free, MTP_ERR_AGAIN on timeout. */
+/* IMPLEMENTER'S CONTRACT, added 2026-09-18 after measuring recovery behaviour.
+ *
+ * The sink's deadline sequence MUST be ABSOLUTE -- each period computed from a
+ * fixed epoch (e.g. rearming a comparator from CNTP_CVAL + period), never a
+ * countdown reloaded at the moment the previous one fired.
+ *
+ * Why it matters: with an absolute sequence, a dropout costs exactly the blocks
+ * that were missed and the stream resynchronises -- measured in emu/, recovery
+ * is one sink period, always, with no drift. A countdown-based driver instead
+ * pushes every subsequent deadline later by however long the interrupt was
+ * delayed, so each dropout permanently slows the audio clock. The audio goes
+ * flat, and -- worst of all -- mtp_audio_underruns() keeps reporting 0, because
+ * from the ring's point of view nothing was ever missed.
+ */
 mtp_status mtp_audio_wait(uint32_t timeout_us);
 
 /* Monotonic count of blocks the DMA played that the application had not

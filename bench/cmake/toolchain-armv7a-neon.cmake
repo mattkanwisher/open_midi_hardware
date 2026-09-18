@@ -53,7 +53,11 @@ if(NOT DEFINED T113_OPT)
   set(T113_OPT "-O2")
 endif()
 
-set(T113_ARCH_FLAGS "-mcpu=cortex-a7 -mfpu=${T113_FPU} -mfloat-abi=hard ${T113_ISA}")
+# -ffp-contract=off matches what the product builds use (port/PORTING.md 4.2),
+# so the cost measured here is the cost of the binary that ships. It also
+# slightly RAISES the instruction count, by un-fusing the multiply-accumulates
+# in Analog.cpp's FIR -- so leaving it off would have flattered the estimate.
+set(T113_ARCH_FLAGS "-mcpu=cortex-a7 -mfpu=${T113_FPU} -mfloat-abi=hard ${T113_ISA} -ffp-contract=off")
 
 set(CMAKE_C_FLAGS_INIT   "${T113_ARCH_FLAGS}")
 set(CMAKE_CXX_FLAGS_INIT "${T113_ARCH_FLAGS}")

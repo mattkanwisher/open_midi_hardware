@@ -249,6 +249,7 @@ The governing rule:
 | **FAIL-5** | `machine = cm32l` but only MT-32 ROMs present | Fall back to MT-32 **with a warning**, do not fail | `[read]` |
 | **FAIL-6** | Underrun | Counted, logged, and the loop recovers — it MUST NOT drift permanently out of sync after one bad block | `[host]` `[qemu]` |
 | **FAIL-7** | MIDI byte lost to FIFO overrun | Counted. A silent drop is the one failure mode that makes a MIDI module feel haunted | `[read]` |
+| **FAIL-8** | Engine back-pressure on a **short message** | Currently counted and **dropped**, where a sysex is stashed and retried. A dropped All Notes Off is a note that hangs until power-cycle. Capacity is the engine queue depth per block period: **23× margin over DIN MIDI at queue 64, 369× at mt32emu's default 1024**, so it cannot occur on this product's wire — first loss measured at 700 000 baud | `[measured]` **`[open]`** — the asymmetry is now deliberate and documented, but not fixed; see `port/DESIGN.md` § 3.5 |
 
 ---
 
@@ -272,7 +273,10 @@ sample, at 48 kHz, 128-frame blocks, ring depth 3, target occupancy 2.
 |---|---|---|
 | **LAT-1** | Of that budget, only **~0.75 ms is non-negotiable** — wire time, DAC group delay, and the I²S frame. Everything else is block size and ring depth | `[read]` |
 | **LAT-2** | Block size and ring depth are **the only two numbers in this design that should move in response to a measurement**. Both are runtime parameters and the harness takes both as arguments | `[read]` |
-| **LAT-3** | Ring depth is simultaneously the latency knob and the robustness knob: every block of ring is 2.67 ms of latency and 2.67 ms of tolerance for a slow render. Set it from a measured worst-case RTF, not from taste | `[read]` |
+| **LAT-3** | Ring depth is simultaneously the latency knob and the robustness knob: every block of ring is 2.67 ms of latency and 2.67 ms of tolerance for a slow render | `[measured]` — tolerance is exactly `(depth − 1)` block periods, confirmed in all 25 cells of an injected-stall sweep |
+| **LAT-6** | **Ring depth does NOT rescue a real-time factor above 1.** The cliff is at RTF 1.00 ± 0.06 and neither tunable parameter moves it — at RTF 1.07 a depth of 8 fails with the same 143 dropouts as a depth of 2. A ring absorbs a *transient*; an RTF above 1 is not a transient. Above ~0.95 the only moves are 32 kHz `COARSE` or fewer partials | `[measured]` `emu/tools/sweep.sh`, `port/DESIGN.md` § 2.2 |
+| **LAT-7** | Depth has a second lower bound unrelated to the renderer: **`depth ≥ ceil(consumer_service_interval / block_period) + 1`**. Our depth of 3 is correct only because the T113's DMAC interrupts once per descriptor. Do not carry 3 to a different consumer without redoing that arithmetic | `[measured]` |
+| **LAT-8** | The sink's deadline sequence **MUST be absolute**, never a reloaded countdown. Absolute recovers in exactly one period with no drift; a countdown makes every dropout permanently slow the audio clock **while still reporting zero underruns** | `[measured]` `port/include/mtp_audio.h` |
 | **LAT-4** | The instantaneous margin is larger than the average: one block that overruns can eat `queued × 2.667 ms` — 5.3 ms at occupancy 2 — before the DMA runs dry | `[read]` |
 | **LAT-5** | For context, a real MT-32's own MIDI-to-note latency is **commonly cited** at 10–20 ms. Nobody on this project has measured one. Treat it as folklore | `[open]` |
 
@@ -309,6 +313,7 @@ says every implementation of the seam must pass the same assertions on them.
 | **OBS-6** | MIDI FIFO overruns | |
 | **OBS-7** | `min_queued` — the lowest ring occupancy ever seen after a commit | **The margin, made visible.** Never below 1 means the loop never came within a block of an underrun. Touching 0 means you are one bad block from a click |
 | **OBS-8** | heap high water | RES-5 |
+| **OBS-12** | **Real-time bytes are invisible.** Active Sensing and MIDI Clock are forwarded to the engine but not counted in `short_msgs`, so they occupy queue slots no counter above the seam can see — and an MPU-401 sends Active Sensing every 300 ms forever | `[measured]` **`[open]`** |
 
 | ID | Requirement | Evidence |
 |---|---|---|

@@ -21,7 +21,7 @@ command -v "${CROSS}gcc" >/dev/null || { echo "no ${CROSS}gcc; apt install gcc-a
 command -v "$QEMU" >/dev/null      || { echo "no $QEMU; apt install qemu-user"; exit 2; }
 
 make clean >/dev/null
-make CC="${CROSS}gcc" CFLAGS="-O2 -g -Wall -Wextra -Wshadow -std=c99 -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard" >/dev/null
+make CC="${CROSS}gcc" CFLAGS="-O2 -g -Wall -Wextra -Wshadow -std=c99 -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -ffp-contract=off" >/dev/null
 
 # test.sh runs build/mtp_host directly, so stand a wrapper in its place.
 mv build/mtp_host build/mtp_host.arm

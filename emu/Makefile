@@ -41,7 +41,12 @@ MMU     ?= 1
 # The ABI is not negotiable: boot/BRINGUP.md 6.1 and port/PORTING.md 4.2 both
 # say Cortex-A7, NEON-VFPv4, hard float, ARM (not Thumb) for the synth. bench/
 # cross-builds mt32emu with exactly these, and the objects have to link.
-ARCHFLAGS := -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -marm
+# -ffp-contract=off: neon-vfpv4 fuses float multiply-accumulate into VFMA (one
+# rounding) where x86-64's SSE2 baseline does two, in Analog.cpp's FIR that
+# every output sample passes through. Without it this image does not render
+# byte-identical PCM to port/host and desktop/, which is the cheapest strong
+# test we have. port/PORTING.md 4.2, desktop/conform.sh.
+ARCHFLAGS := -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -marm -ffp-contract=off
 
 WARN    := -Wall -Wextra -Wshadow -Wundef
 # -U_FORTIFY_SOURCE matters more than it looks. Ubuntu's GCC enables

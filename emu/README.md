@@ -1,8 +1,16 @@
 # `emu/` — the port layer as a bare-metal ARM image
 
-Workstream E. Status: 2026-09-18. **This boots and runs.** Every number in
-[FINDINGS.md](FINDINGS.md) was produced by running the commands below in this
-container; nothing here is a projection.
+Workstream E. Status: 2026-09-18. **This boots, runs, and has been made to
+fail on purpose.** Every number in [FINDINGS.md](FINDINGS.md) was produced by
+running the commands below in this container; nothing here is a projection.
+
+`make test` is eighty-six assertions. Beyond the conformance suite it now
+covers the underrun-vs-(block, ring) surface, the real-time factor at which the
+design breaks, recovery from an injected deadline overrun, five malformed or
+hostile MIDI streams checked against an independent model of the parser's
+contract, the rate at which the pipeline starts dropping messages, the
+consumer-granularity bound on ring depth, and a two-core memory-ordering
+experiment whose negative result is bounded by a control that fires.
 
 This is the second of the two implementations of `port/include` that
 [docs/PLAN.md § 0.5](../docs/PLAN.md) calls for. The first is `port/host`,

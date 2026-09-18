@@ -142,7 +142,9 @@ build_host() {   # build_host <tag> <cc> <cxx> <extra-cflags>
 say "port/host for x86-64"
 build_host x86 cc c++ ""
 
-ARMFLAGS="-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -marm"
+# -ffp-contract=off is the project decision (port/PORTING.md 4.2), so the
+# armv7 leg must carry it: this leg is meant to be the build we ship.
+ARMFLAGS="-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -marm -ffp-contract=off"
 if [ "$HAVE_ARM" = 1 ]; then
     say "port/host cross-built for Cortex-A7"
     # boot/BRINGUP.md 6.1 and port/PORTING.md 4.2: Cortex-A7, NEON-VFPv4, hard
@@ -158,8 +160,8 @@ if [ "$HAVE_ARM" = 1 ]; then
     # 0.07% of samples. -ffp-contract=off removes exactly that difference.
     # Keeping both legs in the run means the finding stays visible and the
     # remedy stays proven. FINDINGS.md 8.2.
-    CROSS_AR=${CROSS}ar build_host armv7-fpoff ${CROSS}gcc ${CROSS}g++ \
-        "$ARMFLAGS -ffp-contract=off"
+    CROSS_AR=${CROSS}ar build_host armv7-fpfast ${CROSS}gcc ${CROSS}g++ \
+        "$ARMFLAGS -ffp-contract=fast"
 else
     echo "no ${CROSS}gcc or $QEMU_USER: skipping the armv7 leg"
 fi
@@ -252,11 +254,11 @@ for vec in demo bank bad voice; do
                      $hosteng $vec
             rename_run host-armv7 $hosteng $eng $vec
             printf ' host-armv7'
-            run_host armv7-fpoff \
-                     "$QEMU_USER -L $SYSROOT $W/armv7-fpoff/mtp_host" \
+            run_host armv7-fpfast \
+                     "$QEMU_USER -L $SYSROOT $W/armv7-fpfast/mtp_host" \
                      $hosteng $vec
-            rename_run armv7-fpoff $hosteng $eng $vec
-            printf ' armv7-fpoff'
+            rename_run armv7-fpfast $hosteng $eng $vec
+            printf ' armv7-fpfast'
         fi
 
         run_desktop $eng $vec
@@ -283,14 +285,16 @@ rc=0
 python3 conform/compare.py $OUT || rc=$?
 echo
 cat <<'NOTE'
-EXPECTED STATE, 2026-09-18. This run reports exactly one divergence, and it is
-a real one, not a flake: host-armv7 built with the project's current flags
-renders the mt32emu `voice` vector 1 LSB differently from every other
-implementation, on 69 of 96256 samples, because GCC contracts the
-multiply-accumulate in mt32emu's Analog.cpp:392 into VFMA. The armv7-fpoff leg
-is the same compiler and the same source with -ffp-contract=off, and it agrees
-with x86-64 exactly. If this script ever reports more than that one line, or a
-different one, something changed. FINDINGS.md 8.2 has the bisection.
+EXPECTED STATE, 2026-09-18 (revised once the flag was adopted). This run reports
+exactly THREE divergences and all three are one deliberate control compared
+pairwise against the three shipping legs, not a defect: the
+armv7-fpfast leg is the same compiler and the same source built with
+-ffp-contract=fast, GCC's default, which contracts the multiply-accumulate in
+mt32emu's Analog.cpp:392 into VFMA and renders the `voice` vector 1 LSB
+differently on 69 of 96256 samples. Every leg the project actually ships --
+host-x86, host-armv7, emu-a7, desktop -- carries -ffp-contract=off and must
+agree byte for byte. If the shipping legs ever disagree, or if the fpfast
+control STOPS diverging, something changed. FINDINGS.md 8.2 has the bisection.
 NOTE
 echo "runs and their output are in $OUT"
 exit $rc

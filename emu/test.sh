@@ -337,6 +337,7 @@ for r in 2 3 4 8; do
     boot "$OUT/st_ok_$r.txt" --engine probe --midi bank --realtime --seconds 4 \
          --block 128 --ring "$r" --stall-at 400 --stall-us "$absorb"
     n=$(grep -E "^stall underruns" "$OUT/st_ok_$r.txt" | awk '{print $3}')
+    : "${n:=missing}"
     if [ "$n" = "0" ]; then
         echo "ok   ring $r absorbs a $(( r - 1 ))-period overrun with no dropout"
     else
@@ -351,7 +352,8 @@ for r in 2 3 4 8; do
     b=$(grep -E "^underrun bursts" "$OUT/st_bad_$r.txt" | awk '{print $3}')
     rec=$(grep -E "^underrun bursts" "$OUT/st_bad_$r.txt" | \
           sed -n 's/.*recovery \([0-9]*\) periods.*/\1/p')
-    if [ "$rec" -le 2 ] 2>/dev/null; then
+    : "${rec:=-1}"
+    if [ "$rec" -ge 0 ] && [ "$rec" -le 2 ] 2>/dev/null; then
         echo "ok   ring $r: back at target occupancy $rec period(s) after the dropout"
     else
         echo "FAIL ring $r: took $rec periods to recover (bursts $b)"
@@ -372,6 +374,7 @@ boot "$OUT/panic31k.txt" --engine probe --engine-queue 64 --midi panic \
      --realtime --baud 31250 --seconds 4
 lost=$(grep -E "^short msgs lost" "$OUT/panic31k.txt" | awk '{print $4}')
 acc=$(grep -E "^engine saw" "$OUT/panic31k.txt" | awk '{print $9}')
+: "${lost:=missing}" "${acc:=missing}"
 if [ "$lost" = "0" ] && [ "$acc" = "1664" ]; then
     echo "ok   1664-message panic storm at 31250 baud: nothing dropped"
 else
@@ -387,6 +390,7 @@ grep_ok "every All Sound Off / Reset / All Notes Off reached the engine" \
 boot "$OUT/panic800k.txt" --engine probe --engine-queue 64 --midi panic \
      --realtime --baud 800000 --seconds 4
 lost=$(grep -E "^short msgs lost" "$OUT/panic800k.txt" | awk '{print $4}')
+: "${lost:=0}"
 if [ "$lost" -gt 0 ] 2>/dev/null; then
     echo "ok   the short-message drop limit exists and is where predicted"
     echo "     (800000 baud, 64-deep engine queue: $lost of 1664 lost;"
@@ -406,6 +410,7 @@ expect "all 64 dumps survive a 1-deep engine queue" "^sysex messages" 64 "$OUT/b
 grep_ok "and their bytes are still exact after the retries" \
         "sysex vs contract   MATCH" "$OUT/bp1.txt"
 bp=$(grep -E "^engine back-pressure" "$OUT/bp1.txt" | awk '{print $3}')
+: "${bp:=0}"
 if [ "$bp" -gt 0 ] 2>/dev/null; then
     echo "ok   the retry path was actually taken ($bp times)"
 else
@@ -428,9 +433,12 @@ if $QEMU -M virt -device help 2>/dev/null | grep -q virtio-sound-device; then
     }
     vrun "$OUT/gap3.txt" 3
     vrun "$OUT/gap8.txt" 8
+    # Defaults matter: with `set -e`, an empty variable inside $(( )) aborts
+    # the whole suite rather than failing this one case.
     gap=$(grep -E "^sink service gap" "$OUT/gap8.txt" | awk '{print $4}')
     u3=$(grep -E "^underruns" "$OUT/gap3.txt" | awk '{print $NF}')
     u8=$(grep -E "^underruns" "$OUT/gap8.txt" | awk '{print $NF}')
+    : "${gap:=0}" "${u3:=-1}" "${u8:=-1}"
     need=$(( gap / 2666 + 2 ))
     if [ "$gap" -gt 6000 ] 2>/dev/null; then
         echo "ok   consumer service interval measured: ${gap} us, so this"
@@ -476,6 +484,7 @@ if grep -q "second core         alive" "$OUT/smp.txt"; then
     mpv=$(grep -E "^mp violations" "$OUT/smp.txt" | awk '{print $3}')
     sbr=$(grep -E "^sb rounds" "$OUT/smp.txt" | awk '{print $3}')
     sbz=$(grep -E "^sb both-zero" "$OUT/smp.txt" | awk '{print $3}')
+    : "${mpi:=0}" "${mpv:=?}" "${sbr:=0}" "${sbz:=0}"
     if [ "$mpi" -ge 200000 ] 2>/dev/null; then
         echo "ok   message-passing litmus ran $mpi times across the two cores"
     else
@@ -533,6 +542,7 @@ else
         grep_ok "mt32emu '$v': parser contract holds with the real engine" \
                 "parser vs contract  MATCH" "$OUT/me_$v.txt"
         g=$(grep -E "^heap grown by run" "$OUT/me_$v.txt" | awk '{print $(NF-1)}')
+        : "${g:=missing}"
         if [ "$g" = "0" ]; then
             echo "ok   mt32emu '$v': zero heap growth while rendering"
         else
@@ -545,6 +555,7 @@ else
     boot "$OUT/me_burst.txt" --engine mt32emu-fakerom --midi bank --seconds 2
     wr=$(grep -E "^worst render" "$OUT/me_burst.txt" | awk '{print $3}')
     u=$(grep -E "^underruns" "$OUT/me_burst.txt" | awk '{print $NF}')
+    : "${wr:=0}" "${u:=?}"
     if [ "$wr" -gt 2666 ] 2>/dev/null && [ "$u" = "0" ]; then
         echo "ok   a block that overran its period (${wr} us > 2666 us) was"
         echo "     absorbed by the ring with no dropout -- DESIGN 2.4 measured"

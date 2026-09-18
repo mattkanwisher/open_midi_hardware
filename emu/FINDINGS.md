@@ -89,8 +89,10 @@ the tables:
   heap growth on all six streams, and the footprint numbers are re-measured
   (§ 14).
 
-`make test` is now **eighty-six assertions**, three consecutive clean runs,
-and takes 1 min 46 s.
+`make test` is now **eighty-six assertions**, and it stays green: three
+consecutive clean runs at 86/86, plus clean runs of the `MMU=0` build and of
+the build without `mt32emu` linked. One run takes about 1 min 50 s
+(1:46 to 1:49 measured across four runs).
 
 **The real `mt32emu` links, opens a `Synth`, and renders — bare metal.** Not
 "links and fails cleanly on missing ROMs", which is what the brief asked for as

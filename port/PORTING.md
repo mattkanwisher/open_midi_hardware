@@ -442,6 +442,38 @@ structures over a device that faults on unaligned access — do not, and keep
 
 ## 5. Can rendering be split across the two A7 cores?
 
+**Confirmed at the instruction level, 2026-09-18.** The source argument invites
+"but maybe the compiler emits a barrier anyway". It does not, and this is two
+re-runnable commands rather than a reading:
+
+```
+$ arm-linux-gnueabihf-objdump -d build/mt32emu/libmt32emu.a \
+    | grep -cE "\b(dmb|dsb|isb|ldrex|strex)\b"
+0
+```
+
+**Zero barrier and zero exclusive instructions in the entire library**, built
+for Cortex-A7. `pushShortMessage` is four plain stores, with the store that
+publishes the entry (`endPosition`) unordered against the three that fill it.
+On x86 that is harmless; on a weakly-ordered A7 a consumer on another core can
+see the index before the payload.
+
+`emu/` then tried to *demonstrate* the hazard on two cores and could not, for a
+reason worth recording: QEMU's TCG emits host-native loads and stores and
+inherits the host's memory model, and x86-64 is TSO — it permits store→load
+reordering and forbids store→store and load→load. **The queue is exposed to
+exactly the two orderings a TSO host cannot produce.** The control test (store
+buffering) fires at 1.6–7.8 %, proving the harness is not inert, and an
+`MMU=0` build drops it to zero, proving the control measures a real memory-type
+property. So: 0 violations in 8 000 000 iterations is *not* evidence the queue
+is safe, and `emu/test.sh` fails loudly if the control ever stops firing so that
+a future "0" can never be misread as reassurance.
+
+Cheapest way to actually settle it, if anyone wants to: compile `emu/src/smp.c`'s
+two litmus tests as a Linux userspace program with two pinned threads on any
+real ARM SMP board — a Pi 2 will do. No T113 and no ROMs required.
+
+
 **No, not for one synth. Read, from the API shape:**
 
 `Synth::render()` is a single serial pass over the sample timeline. Inside it,

@@ -95,11 +95,70 @@ difference and by one third of the output samples — and then the I²S runs at
 
 Double buffering (depth 2) works and halves the latency, but leaves exactly one
 block period of slack for a bad render — no margin at all for an SD access, a
-long sysex or a cache-miss storm. Quadruple buffering (depth 4) is the knob to
-turn if A's RTF comes back above ~0.7. The block size and ring depth are the
-only two numbers in this design that should move in response to a measurement,
-and the harness in `host/` takes both as command-line arguments so the
-experiment is one command.
+long sysex or a cache-miss storm. The block size and ring depth are the only two
+numbers in this design that should move in response to a measurement, and the
+harness in `host/` takes both as command-line arguments so the experiment is one
+command.
+
+**That experiment has now been run** — 25 points of (block, ring) bare-metal
+under QEMU, `emu/tools/sweep.sh`, and it corrects this section twice.
+
+**Correction 1: "quadruple buffering is the knob if the RTF comes back above
+~0.7" was wrong, and named the wrong knob.** Ring depth does not move the
+cliff *at all*. Holding the machine fixed and shortening the block period to
+dial the real-time factor:
+
+| RTF | 128/2 | 128/3 | 128/4 | 128/6 | 128/8 |
+|---|---|---|---|---|---|
+| 0.95 | 1 | 1 | 1 | . | . |
+| **1.07** | 144 | **143** | **143** | **143** | **143** |
+| 1.18 | 512 | 511 | 511 | 511 | 511 |
+
+At RTF 1.07 a depth of 8 — 21.3 ms in flight — fails with the *same* 143
+dropouts as a depth of 2. **The cliff is at RTF 1.00 ± 0.06 and neither
+tunable parameter moves it**, which is obvious in hindsight: a ring is a
+shock absorber for a *transient*, and an RTF above 1 is not a transient.
+
+What depth actually buys is exactly that transient tolerance, and it is exactly
+`(depth − 1)` block periods. Injected stalls, 25 cells, every one of them
+`max(0, stall_periods − (depth − 1))`:
+
+| depth \ stall | 1 period | 2 | 3 | 5 | 10 |
+|---|---|---|---|---|---|
+| 2 | 0 | 1 | 2 | 4 | 9 |
+| 3 | 0 | 0 | 1 | 3 | 8 |
+| 4 | 0 | 0 | 0 | 2 | 7 |
+| 8 | 0 | 0 | 0 | 0 | 3 |
+
+So the fallback ladder this section should have carried:
+
+| Measured worst-case RTF | Do this |
+|---|---|
+| ≤ 0.7 | Keep 128/3 |
+| 0.7–0.9 | Keep 128/3; size depth from the measured *peak* stall, not from taste |
+| **> 0.95** | **Neither block size nor ring depth helps.** Go to § 2.1's `COARSE` at 32 kHz, or fewer partials |
+| > 1.3 | The part is wrong for the job |
+
+§ 2.4 below already says this correctly. It was this section's sentence that
+misled.
+
+**Correction 2: depth has a second lower bound that has nothing to do with the
+renderer** — the consumer's service granularity. Measured against a virtio-sound
+consumer whose worst service gap was 10.2–14.3 ms, `min occupancy` stayed at 1
+in every row (the renderer was never behind) and the dropouts were entirely the
+consumer's:
+
+> **`depth ≥ ceil(consumer_service_interval / block_period) + 1`**, independent
+> of the renderer. Take the larger of this and the renderer-slack bound.
+
+Checked against our depth of 3: the T113's DMAC raises one completion interrupt
+per descriptor, so its service interval is one block and the bound is 2 — the
+renderer bound dominates and **3 is right**. But it is right *because of a
+property of the chosen peripheral*, not because 3 is a good number. Use
+half/full-buffer interrupts instead and the bound becomes 3, with nothing to
+spare; an RTOS work queue at 10 ms wants 5; QEMU's own backend wants 6–7, which
+is why depth 3 shows 125 dry periods a second there. **Do not carry the 3 to a
+different consumer without redoing this arithmetic.**
 
 ### 2.3 DMA and cache
 
@@ -319,6 +378,57 @@ draining underneath it. Instead:
 This is implemented and exercised: the bank-dump test provokes exactly one
 back-pressure event against the fake engine's deliberately small sysex store and
 recovers with zero drops.
+
+### 3.5 Two things about back-pressure that were not stated, and should have been
+
+**(a) The asymmetry is real and has a bad failure mode.** A refused *sysex* is
+stashed and retried; a refused *short message* is counted and **dropped**
+(`mtp_render.c`, `MTP_MSG_SHORT`). Most dropped short messages are survivable —
+a lost note-on is a missing note. **A dropped All Notes Off is a note that hangs
+until the box is power-cycled**, which is the kind of fault users describe as
+the module being haunted.
+
+Measured capacity (`emu/`, a 1664-message panic storm) is **engine queue depth
+per block period**:
+
+| Wire rate | Engine queue | Lost of 1664 |
+|---|---|---|
+| **31 250 baud (real DIN MIDI)** | 64 | **0** |
+| 500 000 baud (16×) | 64 | 0 |
+| 700 000 baud | 64 | 31 |
+| 800 000 baud | 64 | 231 |
+| 1 000 000 baud | 1024 (mt32emu's default) | 0 |
+| unpaced, whole stream at once | 1024 | 640 |
+
+Predicted threshold for a 64-deep queue is 64 / 2.667 ms = 720 000 baud; first
+loss measured at 700 000. **Against DIN MIDI the margin is 23× at queue 64 and
+369× at mt32emu's default 1024**, so this cannot happen on the wire this product
+has. That is why it is documented here rather than fixed in a hurry: the fix is
+a second retry slot, and the *ordering* problem in (b) has to be settled first
+or the fix makes things worse.
+
+**(b) The existing sysex retry has an ordering hole.** `drain_midi()` reads a
+64-byte batch and calls `mtp_midi_parser_feed()`, which emits **every complete
+message in that batch** through the callback before returning. The
+`if (ctx->retry_len != 0u) break;` that stops the draining is checked only
+*after* the whole batch has been fed. So when the engine refuses a sysex
+mid-batch, the messages that follow it in the same 64 bytes are still handed to
+the engine — **ahead of the sysex that was stashed**. Up to about twenty short
+messages can overtake a stashed patch dump.
+
+The window is small and needs an engine that refuses in the first place, so
+nothing observed has tripped it. But `§ 3.4`'s claim that back-pressure
+"propagates to the UART FIFO rather than a patch dump being silently lost" is
+true of the *dump* and not of its *position in the stream*. Closing it properly
+means letting the parser callback signal "stop", which changes
+`mtp_midi_parser.h`'s contract and therefore every implementation of the seam —
+a deliberate change, not a quick one. **Open; see the top of this section.**
+
+**(c) Real-time bytes are invisible to the counters.** `MTP_MSG_REALTIME` is
+forwarded to `engine->short_msg()` but not counted in `stats.short_msgs`, so
+Active Sensing and MIDI Clock occupy engine queue slots that no counter above
+the seam can see. Since a PC's MPU-401 emits Active Sensing every 300 ms
+forever, that is a permanent invisible load.
 
 ---
 

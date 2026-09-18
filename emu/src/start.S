@@ -4,7 +4,9 @@
  * behind, because that is the handover the real board will use:
  *
  *     MMU off, D-cache off and flushed, I-cache state unspecified,
- *     IRQ and FIQ masked, ARM state, PL1, SVC mode, (inferred) secure.
+ *     IRQ and FIQ masked, ARM state, PL1. Mode may be SVC *or non-secure
+ *     Hyp* -- QEMU gives SVC, mainline U-Boot on sunxi gives Hyp. Step 3
+ *     normalises it.
  *
  * That is boot/BRINGUP.md section 4.1's `cleanup_before_linux()` row, and it is
  * also what QEMU's `-kernel` bootloader stub produces on `-M virt`. One image,
@@ -30,6 +32,8 @@
 
     .syntax unified
     .arm
+    /* elr_hyp/eret in step 3 need the virtualisation extension. */
+    .arch_extension virt
 
 /* ---------------------------------------------------------------- vectors */
     .section .vectors, "ax"
@@ -92,7 +96,26 @@ _start:
      *    __attribute__((packed)) and GCC's byte-wise access for them is fine,
      *    but nothing in this port wants an alignment trap. port/PORTING.md
      *    section 4.10. */
+    /*    We may arrive in Hyp (0x1a) rather than SVC. QEMU's -M virt starts a
+     *    -kernel image in SVC, but mainline U-Boot on sunxi hands over in
+     *    non-secure Hyp (measured: CPSR 0x600001da -- boot/BRINGUP.md 4.4),
+     *    and a `msr cpsr_c` that would leave Hyp is IGNORED by the
+     *    architecture. So this normalisation used to be a silent no-op on a
+     *    real board: exceptions would vector through HVBAR instead of VBAR
+     *    and every per-mode stack below would alias the Hyp stack. Detect it
+     *    and eret out. Same code as port/t113/src/start.S, deliberately. */
     cpsid   if
+    mrs     r0, cpsr
+    and     r1, r0, #0x1F
+    cmp     r1, #0x1A                   /* Hyp?                             */
+    bne     1f
+    bic     r0, r0, #0x1F
+    orr     r0, r0, #0xD3               /* SVC, I and F masked              */
+    msr     spsr_cxsf, r0
+    adr     r0, 1f
+    msr     elr_hyp, r0
+    eret                                /* Hyp -> SVC, lands at 1:          */
+1:
     mrs     r0, cpsr
     bic     r0, r0, #0x1F
     orr     r0, r0, #0x13               /* SVC                              */
