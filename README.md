@@ -28,7 +28,7 @@ shortlist that ended on this part.
 | `hw/` | Test board: minimum BOM, DDR3 and power design, boot media, JLCPCB assembly feasibility |
 | `boot/` | Bring-up: U-Boot, awboot, SD boot flow, toolchain, loading a non-Linux payload |
 | `port/` | The port itself: RTOS choice, I2S and DMA, MIDI UART, ROM loading, the platform layer under `mt32emu` |
-| `docs/` | Plan and findings |
+| `docs/` | Plan and findings. Start with [`docs/BOARD_SPEC.md`](docs/BOARD_SPEC.md) — what the device does, observably, and the traps that are not obvious |
 
 ## Licences
 
