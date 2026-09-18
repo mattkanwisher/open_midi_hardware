@@ -62,10 +62,17 @@ tidy:
 
 1. **Nothing above the seam may know which platform it is on.** No `#ifdef T113`
    above the line. If something needs to know, the seam is in the wrong place.
-2. **Both implementations pass the same conformance tests** — the counter
+2. **Every implementation passes the same conformance tests** — the counter
    contract in `port/host/test.sh`: messages parsed, sysexes reassembled,
    underruns, orphan bytes, oversize sysex refused. A platform that passes those
    in QEMU and fails them on silicon has a driver bug, and the test says which.
+   **And the rendered audio is compared sample-for-sample, not just the
+   counters**, by `desktop/conform.sh`, which drives the same MIDI bytes through
+   the host, the armv7 cross build under `qemu-user`, the bare-metal image under
+   `qemu-system-arm`, and the desktop build, and diffs the PCM. That is worth
+   having as a separate rule because it has already caught something the counter
+   contract could not: a floating-point contraction difference that made ARM and
+   x86 disagree by 1 LSB (§ 4, and `port/PORTING.md` § 4.2).
 3. **Keep the lower layer thin, because it is the expensive one.** Every function
    added below the seam is a function that can only be debugged with a scope and
    a board in hand. When there is a choice, push logic upward.
@@ -187,6 +194,15 @@ with it.
   its costs; or **clock the PCM5102A from its own crystal rather than from the
   SoC** — and that last one is copper. **So this is a decision for workstream B
   before the board is drawn, not a software tune afterwards.**
+
+- **Bit-comparability across implementations is a compiler flag away from being
+  lost, and was.** GCC's default `-ffp-contract=fast` fuses a multiply-accumulate
+  on armv7 that x86 does not fuse, inside the one FIR every output sample passes
+  through. Measured: 69 samples in 96 256 differing by 1 LSB, inaudible, and it
+  would have quietly cost the cheapest strong test this project has — "the board
+  renders the same bytes as the bench". `-ffp-contract=off` on every ARM build,
+  `port/PORTING.md` § 4.2. Watch for the same class of thing whenever a new
+  target or a new compiler arrives.
 
 - **No USB host means no USB MIDI, ever, on this design.** That is a deliberate
   trade (§ 2.6 of the parent document) and it must stay deliberate.

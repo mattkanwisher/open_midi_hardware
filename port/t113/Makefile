@@ -45,7 +45,12 @@ T113_MMU ?= 1
 # Not negotiable: boot/BRINGUP.md 6.1 and port/PORTING.md 4.2 both say
 # Cortex-A7, NEON-VFPv4, hard float, ARM (not Thumb). bench/ cross-builds
 # mt32emu with exactly these and the objects have to link against ours.
-ARCHFLAGS := -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -marm
+# -ffp-contract=off: neon-vfpv4 fuses float multiply-accumulate into VFMA (one
+# rounding) where x86-64's SSE2 baseline does two, which makes this board's
+# audio differ from the bench's by 1 LSB on the Analog.cpp FIR that every
+# sample passes through. Bit-comparability across implementations is worth
+# more than the fused form. PORTING.md 4.2.
+ARCHFLAGS := -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -marm -ffp-contract=off
 
 # -Werror is the point of this build. Everything else is emu/'s flag set.
 WARN    := -Wall -Wextra -Werror -Wshadow -Wundef -Wpointer-arith \

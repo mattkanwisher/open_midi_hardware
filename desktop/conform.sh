@@ -276,8 +276,11 @@ done
 # ------------------------------------------------------------ 6. the answer --
 
 echo
-python3 conform/compare.py $OUT
-rc=$?
+# set -e is on, and compare.py exits non-zero when it finds a divergence --
+# which is the interesting case and must not stop the script before it has
+# explained itself.
+rc=0
+python3 conform/compare.py $OUT || rc=$?
 echo
 cat <<'NOTE'
 EXPECTED STATE, 2026-09-18. This run reports exactly one divergence, and it is

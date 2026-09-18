@@ -310,7 +310,8 @@ says every implementation of the seam must pass the same assertions on them.
 | ID | Requirement | Evidence |
 |---|---|---|
 | **OBS-9** | `min_queued` SHOULD be logged every few seconds on the target | `[read]` |
-| **OBS-10** | All four implementations of the seam MUST agree on every counter for the same input | `[host]` `[qemu]` — two of the four verified; the T113 one does not exist yet |
+| **OBS-10** | All implementations of the seam MUST agree on every counter for the same input | `[host]` `[qemu]` — verified across five builds by `desktop/conform.sh`: host x86-64, armv7 under `qemu-user`, the same with `-ffp-contract=off`, bare-metal Cortex-A7, and the desktop build. Every counter agreed on every run |
+| **OBS-11** | They MUST also render **byte-identical PCM** for the same input. This is a stronger test than the counters and it is cheap | `[measured]` — byte-identical across all five on the fake engine; the one divergence found was floating-point contraction, now fixed by flag (§ 9 trap 14). **Still unverified: bare-metal ARM against x86 on non-silent *synthesiser* output**, because the bare-metal image's MIDI vectors are compiled in and do not yet include a stream that makes the fake-ROM engine sound |
 
 ---
 
@@ -367,7 +368,15 @@ way by someone in this project, and each has a citation.
 13. **QEMU tells you nothing about speed.** Its TCG models neither the A7
     pipeline nor its caches. Structural correctness, yes; timing, never.
 
-14. **Do not commit ROMs, and do not commit the vendored upstreams.**
+14. **Watch floating-point contraction.** GCC's default `-ffp-contract=fast`
+    fuses a multiply-accumulate on armv7 that x86-64 does not fuse, inside
+    `Analog.cpp`'s polyphase FIR — which every output sample passes through in
+    `AnalogOutputMode_ACCURATE`. The audio difference is 1 LSB and inaudible;
+    the cost is that the board and the bench stop being bit-comparable, which
+    is the cheapest strong test available here. `-ffp-contract=off` on every ARM
+    build. `port/PORTING.md` § 4.2.
+
+15. **Do not commit ROMs, and do not commit the vendored upstreams.**
     `bench/vendor/`, `boot/vendor/` and `port/vendor/` are gitignored. Munt is
     cloned at a recorded commit, not submoduled, because the LGPL boundary is
     cleaner if upstream is fetched rather than embedded.

@@ -229,7 +229,36 @@ is a legitimate implementation of `operator new` on this target (§4.3).
 -std=c++98 -fno-exceptions -fno-rtti -fno-threadsafe-statics
 -ffunction-sections -fdata-sections -O2
 -marm -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard
+-ffp-contract=off
 ```
+
+**`-ffp-contract=off` is not optional, and it was added 2026-09-18 because a
+measurement caught its absence.** GCC defaults to `-ffp-contract=fast`. On armv7
+with `-mfpu=neon-vfpv4` that fuses a float multiply-accumulate into `VFMA`, one
+rounding where x86-64's baseline SSE2 does two. There is exactly one place in
+`mt32emu` where it matters, and it is on the output path of every single sample:
+`Analog.cpp:390-391`, the polyphase FIR inside
+`AccurateLowPassFilter::process()` that models the MT-32's analogue low-pass and
+resamples 32 kHz to 48 kHz — which `AnalogOutputMode_ACCURATE`, the mode
+DESIGN.md §2.1 chose, runs unconditionally.
+
+Verified here, not reasoned about: `arm-linux-gnueabihf-objdump -d` counts **4
+`VFMA` in the ARM build of `Analog.o` and 0 in the x86 build**, 0 again with the
+flag on; and `desktop/conform.sh` bisected the divergence to that translation
+unit by rebuilding one file at a time. The audible consequence is nil — 69
+samples in 96 256 differ by 1 LSB, and Munt's own comment calls those
+coefficients "nearly bit-accurate for 16-bit".
+
+The *testing* consequence is the reason for the flag. "The board renders the
+same bytes as the bench" is an extremely cheap and extremely strong test, and it
+is only available if every implementation contracts the same way. Losing it to a
+compiler default would be a bad trade. The alternative — declaring the fused
+form canonical and changing the x86 builds instead — is defensible and was
+rejected only because `off` is the portable choice; what is not defensible is
+leaving it undecided, which is what it was.
+
+Applies to **every** ARM build of the library: `bench/`, `emu/`, `port/t113/`
+and the armv7 cross build in `port/host`.
 
 `-fno-threadsafe-statics` removes `__cxa_guard_*` outright, which is correct
 here: the only function-local static is `Tables::getInstance()`, and the header
