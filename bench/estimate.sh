@@ -271,12 +271,22 @@ if command -v valgrind >/dev/null 2>&1; then
   say "  x86-64 insn/frame at 32 partials : $(python3 -c "print('%.1f' % (($VG_HI-$VG_LO)/512.0))")"
   say "  armv7-a insn/frame at 32 partials: $(grep -P '^arm-p32\t' "$OUT/arm-insn.tsv" | head -1 \
         | awk -F'\t' '{printf "%.1f", ($7-$6)/512.0}')"
-  if [ -n "$HOST_NS32" ] && [ "$HOST_GHZ" != "0" ]; then
+  if [ -n "$HOST_NS32" ]; then
     say "  host best wall clock             : $HOST_NS32 ns/frame"
-    say "  nominal host clock               : $HOST_GHZ GHz (from /proc/cpuinfo; the"
-    say "                                     real turbo clock is not visible in this"
-    say "                                     container, so this IPC is nominal)"
-    say "  => host IPC on THIS code         : $(python3 -c "print('%.2f' % ((($VG_HI-$VG_LO)/512.0)/($HOST_NS32*$HOST_GHZ)))")"
+    say "  => host retires this code at     : $(python3 -c "print('%.2f instructions per nanosecond' % ((($VG_HI-$VG_LO)/512.0)/$HOST_NS32))")"
+    say "     an A7 at 1.2 GHz and IPC 1.0 would manage 1.20, so the host is"
+    say "     $(python3 -c "print('%.1fx' % (((($VG_HI-$VG_LO)/512.0)/$HOST_NS32)/1.2))") faster per unit time on this code."
+    if [ "$HOST_GHZ" != "0" ]; then
+      NOMIPC="$(python3 -c "print('%.2f' % ((($VG_HI-$VG_LO)/512.0)/($HOST_NS32*$HOST_GHZ)))")"
+      say "  nominal host IPC at $HOST_GHZ GHz  : $NOMIPC"
+      if [ "$(python3 -c "print(1 if $NOMIPC > 4.0 else 0)")" = 1 ]; then
+        say "     ^ ABOVE 4: NOT A REAL IPC. No x86-64 core retires that many"
+        say "       instructions per cycle on code like this. It means the clock in"
+        say "       /proc/cpuinfo is not the clock this container actually runs at,"
+        say "       which is normal under virtualisation. Do not quote it; quote the"
+        say "       instructions-per-nanosecond figure above, which needs no clock."
+      fi
+    fi
   fi
   say ""
 else
@@ -326,6 +336,36 @@ for k in sorted(delta, key=lambda x: -delta[x])[:20]:
     print("  %8.1f  %5.1f%%  %s" % (delta[k] / float(frames),
                                     100.0 * delta[k] / total, k))
 PY
+say ""
+
+# ------------------------------- what NEON actually bought, attributed ------
+#
+# -dfilter restricts the exec log to one address range, so this counts the
+# instructions executed *inside* Synth::loadPCMROM and nothing else, in the
+# NEON build and in the no-NEON build. That turns "NEON only helps the ROM
+# decode" from an inference into a measurement.
+
+pcmrom_insns() {   # pcmrom_insns <binary>
+  local bin="$1" line start size
+  line="$(arm-linux-gnueabihf-nm -C --defined-only -S "$bin" \
+          | grep -m1 'MT32Emu::Synth::loadPCMROM')"
+  [ -n "$line" ] || { echo "0"; return; }
+  start="0x$(printf '%s' "$line" | awk '{print $1}')"
+  size="0x$(printf '%s' "$line" | awk '{print $2}')"
+  { qemu-arm -dfilter "${start}+${size}" -one-insn-per-tb -d exec -D /dev/fd/3 \
+      "$bin" --count-mode --block "$BLOCK" --partials 0 --seconds 0 \
+      > /dev/null 2>/dev/null; } 3>&1 | wc -l
+}
+
+say "--- instructions executed inside Synth::loadPCMROM (one-time, at open) ---"
+PCM_NEON="$(pcmrom_insns "$B_ARM/rtf-synth")"
+PCM_SCALAR="$(pcmrom_insns "$B_ARM_NONEON/rtf-synth")"
+say "  NEON build    : $PCM_NEON"
+say "  no-NEON build : $PCM_SCALAR"
+if [ "$PCM_NEON" -gt 0 ]; then
+  say "  ratio         : $(python3 -c "print('%.2fx' % ($PCM_SCALAR/float($PCM_NEON)))")"
+  say "  per PCM ROM byte (524288 B): $(python3 -c "print('%.2f vs %.2f instructions' % ($PCM_NEON/524288.0, $PCM_SCALAR/524288.0))")"
+fi
 say ""
 
 # ------------------------------------------------------- static code census --

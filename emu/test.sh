@@ -234,7 +234,7 @@ fi
 timeout "$TIMEOUT" $QEMU $QFLAGS \
     -semihosting-config "enable=on,target=native,arg=x,arg=--engine,arg=mt32emu-fakerom,arg=--midi,arg=bank,arg=--seconds,arg=2" \
     -kernel "$ELF" 2>&1 | tr -d '\r' > "$OUT/m.txt" || true
-if grep -q "this image has: fake)" "$OUT/m.txt"; then
+if grep -q "unknown engine .mt32emu-fakerom" "$OUT/m.txt"; then
     echo "skip mt32emu engine (image built without it; use: make mt32emu)"
 else
     grep -q -- "--- end ---" "$OUT/m.txt" || { echo "FAIL mt32emu run did not finish"; fail=1; }
@@ -513,7 +513,7 @@ fi
 # Case 7 above runs mt32emu on one stream. These run it on all of them, so
 # that "the conformance suite passes bare metal" means the suite and not one
 # case of it.
-if grep -q "this image has: fake)" "$OUT/m.txt"; then
+if grep -q "unknown engine .mt32emu-fakerom" "$OUT/m.txt"; then
     echo "skip mt32emu full sweep (image built without it; use: make mt32emu)"
 else
     for v in demo bank bad rtsysex runstat trunc; do

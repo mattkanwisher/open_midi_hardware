@@ -35,7 +35,18 @@ make mt32emu         # also link the real Munt (needs bench/vendor/munt)
 make size            # static footprint
 make MMU=0 ...       # build with the MMU and caches left off
 make uimage          # wrap the .bin for U-Boot `bootm` on a real board
+
+tools/sweep.sh              # the (block, ring) surface under load
+tools/sweep.sh --rtf        # how slow the renderer can get before it breaks
+tools/sweep.sh --cliff      # the same, in fine steps around real-time factor 1
+tools/gen_vectors.py src/   # regenerate the MIDI vectors and their expectations
 ```
+
+`tools/sweep.sh` is the one command `port/DESIGN.md` § 2.2 asks for — it takes
+block size and ring depth as arguments and produces the underrun surface. It
+is not part of `make test` because it takes two and a half minutes; `make test`
+asserts spot points from it instead. [FINDINGS.md](FINDINGS.md) § 10 has the
+tables and, more importantly, what they do and do not mean.
 
 `make run` takes arguments the same way `port/host/mtp_host` does:
 
@@ -54,14 +65,33 @@ about how fast a Cortex-A7 is — see [FINDINGS.md](FINDINGS.md) § 2.
 
 | Flag | |
 |---|---|
-| `--midi demo\|bank\|bad` | which compiled-in stream to play |
-| `--engine fake\|mt32emu\|mt32emu-fakerom` | which synthesiser |
-| `--sink timer\|virtio` | which audio sink (`timer` is the default) |
+| `--midi demo\|bank\|bad\|rtsysex\|runstat\|panic\|trunc` | which compiled-in stream to play |
+| `--engine fake\|probe\|mt32emu\|mt32emu-fakerom` | which synthesiser |
+| `--sink timer\|virtio\|none` | which audio sink (`timer` is the default) |
 | `--wav FILE` | also write the rendered PCM to a host file |
 | `--seconds S`, `--block N`, `--ring N`, `--rate HZ`, `--lookahead N` | as in `port/host` |
 | `--realtime` | pace the MIDI stream at 31 250 baud |
 | `--control-rom P`, `--pcm-rom P`, `--root DIR` | ROM paths, read off the host filesystem |
 | `-v` | debug logging |
+
+and the ones that exist only to break things, all of which are used by
+`make test` and none of which the product has:
+
+| Flag | |
+|---|---|
+| `--baud N` | pace the MIDI stream at something other than 31 250, to find where the pipeline starts dropping messages (FINDINGS § 11.5) |
+| `--engine-queue N` | with `--engine probe`, pretend the synth's event queue holds only N events, so the render loop's back-pressure path is actually taken |
+| `--stall-at N --stall-us U` | hold the producer for U µs before block N: a deadline overrun, injected (FINDINGS § 10.4) |
+| `--sink none` | retire every block the instant it is committed, so wall/audio is a real-time factor instead of 1.000 |
+| `--smp hvc\|smc`, `--smp-mp N`, `--smp-sb N` | boot the second core and run two memory-ordering litmus tests on it (FINDINGS § 13). Needs `-smp 2 -accel tcg,thread=multi` and **no** `-icount` |
+
+The three streams `port/host/test.sh` uses are `demo`, `bank` and `bad`; the
+other four are `emu/`'s own failure-mode vectors — real-time bytes inside a
+sysex, running status straddling every read boundary, an all-notes-off storm,
+and a stream that stops mid-sysex. Each one carries the counters it *should*
+produce, computed by an independent model of `port/include/mtp_midi_parser.h`'s
+contract in `tools/gen_vectors.py`, and the image prints `MATCH` or `MISMATCH`
+against them.
 
 ## What is in here
 
@@ -82,7 +112,10 @@ about how fast a Cortex-A7 is — see [FINDINGS.md](FINDINGS.md) § 2.
 | `src/semihost.c` | host files and argv |
 | `src/main.c` | the harness; prints the same counters `port/host` prints |
 | `src/engine_mt32emu_fake_roms.cpp` | the real Munt, opened on fabricated ROMs |
-| `tools/gen_vectors.py` | compiles `port/host`'s MIDI test vectors into `.rodata` |
+| `src/engine_probe.c` | an engine that hashes what it is handed and can refuse on demand — how sysex *content* is asserted, not just sysex count |
+| `src/smp.c` | PSCI CPU_ON, and two memory-ordering litmus tests across two cores |
+| `tools/gen_vectors.py` | compiles the MIDI test vectors into `.rodata`, together with an independent model of what each must produce |
+| `tools/sweep.sh` | the block-size / ring-depth experiment |
 | `tools/prepare-mt32emu.sh` | stages Munt's headers out of source; `bench/` is never written to |
 
 Nothing outside `emu/` is modified. `port/src`, `port/include` and
@@ -105,6 +138,12 @@ There is no I2S in `-M virt`, so the sink is the interesting part.
 3. **The semihosting WAV tap**, `--wav`, which works with either of the above
    and with no device at all. It buffers in RAM and writes once at close, so it
    does not perturb the deadline.
+
+There is also `--sink none`, which is not a sink: it retires each block as soon
+as it is committed so that the render loop never waits, which makes wall/audio
+the pipeline's own cost. It exists to measure a real-time factor — of a
+fictional machine whose speed `-icount shift` chooses. It cannot underrun and
+its underrun counter means nothing.
 
 ## Licences
 

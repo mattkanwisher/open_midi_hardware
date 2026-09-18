@@ -7,6 +7,9 @@
 #   make wav          render the demo stream to build/out.wav over semihosting
 #   make virtio       render through a virtio-sound device model to a host wav
 #   make size         text/data/bss and the static footprint
+#   make sweep        the block-size / ring-depth surface (tools/sweep.sh)
+#   make cliff        the same, in fine steps around real-time factor 1
+#   make smp          boot a second core and run the memory-ordering litmus
 #   make mt32emu      also link the real mt32emu (needs bench/vendor/munt)
 #   make MMU=0 ...    build with the MMU and caches left off, as bootm hands over
 #   make uimage       wrap the .bin with mkimage for U-Boot `bootm` on a T113
@@ -111,7 +114,8 @@ LDLIBS   := $(MT32EMU_LIB) $(LDLIBS)
 INC      += -I$(MT32EMU_INC)
 endif
 
-.PHONY: all run test wav virtio size dump clean vectors mt32emu uimage help
+.PHONY: all run test wav virtio size dump clean vectors mt32emu uimage help \
+        sweep cliff smp
 
 all: $(TARGET).elf $(TARGET).bin
 
@@ -213,6 +217,26 @@ virtio: all
 
 test: all
 	./test.sh
+
+# The experiment port/DESIGN.md 2.2 asks for. Not part of `make test`: it takes
+# about two and a half minutes. See FINDINGS.md 10 for what the numbers mean,
+# and in particular for what they do NOT mean about a Cortex-A7.
+sweep: all
+	./tools/sweep.sh $(SWEEPARGS)
+
+cliff: all
+	./tools/sweep.sh --cliff --shift 4 --seconds 4 $(SWEEPARGS)
+
+# -icount is deliberately absent and thread=multi deliberately present: icount
+# forces single-threaded TCG, in which the two cores never run at the same time
+# and the litmus test manages 25 iterations in five seconds. FINDINGS.md 13.
+SMPFLAGS := -M virt -cpu cortex-a7 -smp 2 -m 256 -nographic -nodefaults \
+            -serial mon:stdio -no-reboot -accel tcg,thread=multi
+SMPARGS  ?= --smp hvc --smp-mp 2000000 --smp-sb 2000000
+smp: all
+	$(QEMU) $(SMPFLAGS) -semihosting-config \
+	  "enable=on,target=native,arg=x,arg=--engine,arg=probe,arg=--midi,arg=demo,arg=--seconds,arg=0.2,$(subst $(space),$(comma),$(strip $(foreach a,$(SMPARGS),arg=$(a))))" \
+	  -kernel $(TARGET).elf
 
 size: all
 	@$(SIZE) -A $(TARGET).elf

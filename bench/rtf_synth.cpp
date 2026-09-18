@@ -487,7 +487,7 @@ int main(int argc, char **argv) {
 
 	/* Patch Temp for parts 0..7.  Written BEFORE the timbres, because a write
 	 * here calls Part::resetTimbre(), which copies the (all-zero) ROM timbre
-	 * over Timbre Temp (Synth.cpp:1758, Part.cpp:215). */
+	 * over Timbre Temp (Synth.cpp:1767, Part.cpp:214). */
 	for (int p = 0; p < 8; p++) {
 		Bit8u pt[16];
 		memset(pt, 0, sizeof(pt));

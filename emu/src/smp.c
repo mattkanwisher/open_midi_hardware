@@ -336,11 +336,22 @@ int emu_smp_run(const char *conduit, uint32_t mp_iters, uint32_t sb_iters)
     dmb_ish();
     g_mode = 3u;
 
-    printf("verdict             %s\n",
-           (g_mp_violations == 0u && g_sb_both_zero == 0u)
-           ? "NO REORDERING OBSERVED -- see src/smp.c: this is a statement "
-             "about TCG, not about a Cortex-A7"
-           : "REORDERING OBSERVED");
+    /* Two separate verdicts, because conflating them is the whole trap. SB is
+     * the control: it says whether this environment can show non-sequentially-
+     * consistent execution at all. MP is the hazard: it is the reordering
+     * mt32emu's queue is actually exposed to. On an x86-64 host the first
+     * fires and the second cannot, because TSO permits store->load and forbids
+     * store->store. See the comment at the top of this file. */
+    printf("control (sb)        %s\n",
+           g_sb_both_zero ? "FIRED -- this harness can see reordering"
+                          : "SILENT -- this harness is sequentially consistent,"
+                            " so the mp result below means NOTHING");
+    printf("hazard (mp)         %s\n",
+           g_mp_violations
+           ? "OBSERVED -- port/PORTING.md 5 settled in the affirmative"
+           : "NOT OBSERVED -- and on a TSO host it CANNOT be: mt32emu's queue"
+             " is exposed to store-store and load-load reordering, which the"
+             " host does not do and TCG does not add. Not evidence of safety.");
     printf("--- end smp ---\n");
     return 0;
 }
