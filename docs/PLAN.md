@@ -9,7 +9,7 @@ All four workstreams have reported once. What is settled and what is not:
 
 | | |
 |---|---|
-| **The gate is open.** No real-time factor has been measured, because MT-32 ROMs are copyrighted and absent here. `bench/` builds for host and Cortex-A7 and is ready to run | **blocking everything** |
+| **The gate is open, and now has numbers either side of it.** Still no measured RTF — that needs ROMs and silicon. But the armv7 instruction count is measured exactly, so the gate reduces to one unknown: whether an A7 sustains **≈0.75 IPC** on this code. Floor of 0.225 regardless. § 0 | **blocking everything** |
 | DRAM parameters: resolved **and now compiled**. GPL source in mainline U-Boot, density auto-detected, four Kconfig numbers separate external from co-packaged DDR3. `boot/` builds three U-Boot targets green, ours included, and the defconfig that was published here did not build until this pass | closed |
 | **Console pins gate copper.** Mainline's SPL does its console pinmux in C with exactly two arms — UART0 on **PE2/PE3** or UART3 on **PB6/PB7**; anything else is `#error`. U-Boot proper is DT-based and *will* drive PB8/PB9, so a board wired there gets a silent SPL and a talkative U-Boot — losing precisely the DRAM debug output you need when DRAM fails | **new, constrains the schematic** |
 | DDR3 address/command routing: straight through, no swizzle, with the reasoning and the one-command efuse check in `hw/HARDWARE.md` § 5.4 | closed, pending that check |
@@ -38,10 +38,52 @@ USB-free I/O, the display and MIDI parsing still fit, and so that a second synth
 - RTF 0.6 to 1.0: proceed, but single-synth only, and revisit the sample rate.
 - RTF over 1.0: stop. Either the part is wrong or the project is a Pi again.
 
+### What is now known, 2026-09-18
+
+**The gate is still open, but it is no longer evidence-free.** Workstream A
+measured the *instruction count* exactly, which is not timing but is not
+nothing. On fabricated ROMs, with the partial count asserted rather than
+assumed:
+
+```
+armv7-a instructions per output frame = 489.9 + 511.5 x (sounding partials)
+```
+
+— least squares over seven points, worst residual 0.03 %. At the MT-32's
+maximum of 32 partials that is **16 859 instructions per frame** (reproduced
+independently: 16 859.4 against the harness's 16 859.6).
+
+One A7 core at 1.2 GHz has 37 500 cycles per frame at 32 kHz. So the whole
+gate now reduces to **one unknown multiplier, the sustained IPC**:
+
+| | Required IPC |
+|---|---|
+| RTF ≤ 0.6 (§ 0's target) | **0.749** — 0.61–0.80 across timbre mixes; **0.79** at 48 kHz |
+| Real time at all (RTF ≤ 1.0) | **0.450** |
+| Hard floor: RTF cannot be below this, since an A7 is at best partial-dual-issue | **0.225** |
+
+And the fallback ladder is quantified by inverting the cost line — at IPC 0.80
+all 32 partials fit inside RTF 0.6; at 0.70 the ceiling is about 30 partials;
+at 0.60, 25; at 0.50, 21; at 0.40, 17.
+
+**Every identified bias points the same way: the real figure will be worse.**
+QEMU counts an L1 hit and a DRAM miss identically, and the synthetic workload is
+unrealistically cache-friendly — 32 partials share one timbre and the fabricated
+PCM ROM points every wave-map entry at a single 2 KiB window, where real partials
+stride a decoded 512 KiB–1 MiB array. `bench/ANALYSIS.md` § 9 tabulates the
+biases with their directions and is titled so that nobody quotes § 8 without it.
+
 Measure on real silicon as soon as one is on the desk — a $15 to $25 T113 board
 (100ask DongshanPI, MangoPi, a Forlinx eval, whatever is in stock) under Linux
 is a perfectly good proxy for this measurement, because the question is cycles,
 not the OS.
+
+**And there is now a cheaper first step that needs no ROMs at all.** Running
+`bench/rtf-synth` on any Cortex-A7 and dividing elapsed time by the instruction
+counts above **yields the measured IPC directly** — the one missing multiplier —
+on day one, with zero copyrighted material involved. The caveat travels with the
+number: that IPC is itself an upper bound, because the synthetic working set is
+far smaller than a real score's.
 
 ## 0.5 The method: emulate everything above the seam
 

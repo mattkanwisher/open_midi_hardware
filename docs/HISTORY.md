@@ -101,6 +101,22 @@ three `cos` and an `fmod` in the per-sample function), and **NEON does not help
 the synthesis** — GCC emits no vector registers on the render path, because the
 LA32 is a sequential state machine whose core operation is a table gather.
 
+> **Superseded in part, 2026-09-18, by a second pass that could run things.**
+> Three corrections, in the house style of § 2:
+>
+> | Claimed | Actually |
+> |---|---|
+> | "Emulation produces no timing evidence at all" (§ 7 below) | Too strong. Emulation produces an exact **instruction count**, which is not timing but is not nothing. 16 859 armv7 instructions per frame at 32 partials, so the gate reduces to one unknown multiplier — whether an A7 sustains ≈0.75 IPC |
+> | The float renderer is "several times slower" | **1.6×** the instructions, not several times. The conclusion survives on other grounds — a serial double-precision VFP dependency chain on an in-order core, and double the temp buffers and reverb lines — but the sentence overstated it |
+> | "NEON does not help" | True of the render path (−0.03 % at 32 partials, and what little it does is in `muteSampleBuffer`). But it gives a **5.76× speed-up on PCM ROM loading** — 4.25 against 24.50 instructions per ROM byte. NEON pays for itself once, at boot, and never again |
+>
+> Two of the second pass's own bugs are worth recording, because both produced
+> *plausible* numbers: `setReverbEnabled(false)` right after `open()` is
+> silently undone by a later System Area write, so reverb-on and reverb-off
+> first measured identical; and `getPartialStates()` packs four partials per
+> byte, which made a 32-partial workload read as 8. The harness now asserts its
+> own configuration rather than trusting it.
+
 ### `hw/` — the board
 About **$19 of parts**, $38–47 a board at qty 5. Single-channel 16-bit DRAM
 controller means one chip point-to-point, **no VTT rail and no termination**. The
@@ -166,8 +182,11 @@ names it.
 
 1. **The gate.** Does mt32emu render faster than real time on one 1.2 GHz
    Cortex-A7? Needs ROM dumps and a board. Nothing else matters first, and no
-   amount of further reading will settle it — emulation produces no timing
-   evidence at all.
+   amount of further *reading* will settle it — though **running** it under
+   emulation turned out to settle more than this sentence originally allowed:
+   the instruction count is exact, and the question is now precisely "does an
+   A7 sustain 0.75 IPC on this code?" See `docs/PLAN.md` § 0 and the correction
+   above. A cheap first measurement needs no ROMs at all.
 2. **The power-up sequence**, unread. The vendor warns that wrong timing destroys
    the part. Four PDFs, none reachable from this session's network.
 3. **The AC remapping table**, one `xfel read32` away on the first board.

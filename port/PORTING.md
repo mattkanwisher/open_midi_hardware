@@ -416,6 +416,15 @@ build, takes a lock. Supply your own three-line xorshift or LCG and let the
 linker prefer it; it is a legitimate substitution because the only property the
 code needs is "two low bits that vary".
 
+**Measured, 2026-09-18, and now sized.** A symbol profile of the armv7 render
+path puts `__random` plus `__random_r` at **1.5 % of all render instructions** —
+about 253 of the 16 859 instructions per frame at 32 partials
+(`bench/ANALYSIS.md` § 8). That is the same order as the whole reverb stage
+(1.5 %) and twice the analogue low-pass filter (0.8 %). For three lines of
+xorshift it is the cheapest win available anywhere in this port, and unlike
+every other optimisation on the list it carries no risk to the audio, because
+the caller uses two bits of it.
+
 ### 4.10 Packed structs and unaligned access
 
 **Read.** `Structures.h:34` defines `MT32EMU_ALIGN_PACKED` as

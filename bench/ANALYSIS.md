@@ -220,9 +220,9 @@ correction:**
 3. mt32emu's own default is the integer renderer (`Synth.cpp:331`), and upstream
    calls it both the more accurate and the faster model.
 
-So: **use `--renderer int`** — but the sentence above this one was an
-overstatement, and that is the argument for running things rather than reading
-them.
+So: **use `--renderer int`.** But "several times slower, and not a close call",
+two paragraphs up, was an overstatement, and correcting it is the argument for
+running things rather than reading them.
 
 ## 4. Would NEON help? Mostly no, with one specific exception
 
@@ -293,6 +293,20 @@ once per output sample rather than per partial-sample, so it is unlikely to be
 where the time is.
 
 ### 4.1 Measured: the ablation, and the one place NEON does pay
+
+First, the census above is now reproducible. `bench/estimate.sh` regenerates it
+into `results/neon-census.tsv` with
+
+```
+arm-linux-gnueabihf-objdump -d <object> |
+  grep -cE '^[[:space:]]*[0-9a-f]+:.*[[:space:]]q[0-9]+'
+```
+
+which counts disassembly lines carrying a q-register operand. It reports **537**
+for `Synth.cpp.o` where the table above says 531; the expression used for the
+original table was not recorded, and this build also defines
+`MT32EMU_WITH_TESTING`, so the two are not strictly comparable. Every zero in
+that table is still zero, which is the part the conclusion rests on.
 
 The reading above is now an ablation. Same source, same `-O2`, same
 `-mcpu=cortex-a7`; built once with `-mfpu=neon-vfpv4` and once with
@@ -544,12 +558,13 @@ count was read back from the synth and matched what was asked for.
 | 2 | 1 514.1 | 517.5 |
 | 4 | 2 539.2 | 512.6 |
 | 8 | 4 586.0 | 511.7 |
-| 16 | 8 670.4 | 510.5 |
+| 16 | 8 670.4 | 510.6 |
 | 24 | 12 765.4 | 511.9 |
 | 32 | **16 859.6** | 511.8 |
 
-The marginal cost is flat to better than ±0.7 % across the whole range, so one
-line describes it:
+The marginal cost is flat to within 1.2 % of the fitted slope across the whole
+range — and the single outlier is the 1-to-2-partial step, the noisiest one —
+so a straight line describes it:
 
 ```
 armv7-a instructions per output frame  =  489.9  +  511.5 x (sounding partials)
@@ -639,7 +654,8 @@ The same `-d exec` trace names the symbol each PC falls in, so it profiles as
 well as it counts — exactly, with no sampling error at all. Subtracting a
 zero-audio run from a 512-frame run leaves the render path alone. 32 partials,
 square, structure 0, reverb on, analog coarse; 8 632 187 instructions for 512
-frames, 16 859.7 per frame, which is the § 8.4 figure recovered independently:
+frames, 16 859.7 per frame, which is § 8.4's figure recovered from the per-symbol
+totals rather than from the grand total (the 0.1 is rounding):
 
 | insn/frame | share | symbol |
 |---:|---:|---|
