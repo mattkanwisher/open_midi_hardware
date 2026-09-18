@@ -3,3 +3,5 @@ cmbuild*/
 *.o
 *.wav
 *.syx
+vendor/
+t113/build/
