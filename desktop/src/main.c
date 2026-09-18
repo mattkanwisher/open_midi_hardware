@@ -72,6 +72,9 @@ static void usage(const char *argv0)
 "  --machine NAME         mt32 (default) or cm32l; picks the ROM file names\n"
 "  --control-rom PATH     control ROM, overriding --roms/--machine\n"
 "  --pcm-rom PATH         PCM ROM, overriding --roms/--machine\n"
+"  --control-rom2 PATH    second half of a split control ROM image\n"
+"  --pcm-rom2 PATH        second half of a split PCM ROM image\n"
+"  --gain G               master output gain, 1.0 = unity (default 1.0)\n"
 "  --no-reverb            open the synth with reverb off\n"
 "  --partials N           partial limit, 32 is a real MT-32 (default 32)\n"
 "\n"
@@ -95,12 +98,13 @@ int main(int argc, char **argv)
     const char *roms_dir = "roms";
     const char *machine = "mt32";
     const char *control_rom = NULL, *pcm_rom = NULL;
+    const char *control_rom2 = NULL, *pcm_rom2 = NULL;
     const char *audio_backend = "auto", *audio_device = NULL, *tap = NULL;
     const char *smf = NULL;
     int   smf_loop = 0, reverb = 1, verbose = 0, quiet = 0, i;
     uint32_t rate = 48000, block = 128, ring = 3, lookahead = 0, partials = 32;
     unsigned periods = 3, status_ms = 500;
-    double seconds = 0.0;
+    double seconds = 0.0, gain = 1.0;
     int have_source = 0;
 
     char ctrl_buf[1024], pcm_buf[1024];
@@ -132,6 +136,9 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--machine"))    NEXT(machine);
         else if (!strcmp(a, "--control-rom"))NEXT(control_rom);
         else if (!strcmp(a, "--pcm-rom"))    NEXT(pcm_rom);
+        else if (!strcmp(a, "--control-rom2"))NEXT(control_rom2);
+        else if (!strcmp(a, "--pcm-rom2"))   NEXT(pcm_rom2);
+        else if (!strcmp(a, "--gain"))    { const char *v; NEXT(v); gain = atof(v); }
         else if (!strcmp(a, "--no-reverb"))  reverb = 0;
         else if (!strcmp(a, "--midi-loop"))  smf_loop = 1;
         else if (!strcmp(a, "--midi-smf"))   NEXT(smf);
@@ -239,8 +246,10 @@ int main(int argc, char **argv)
     }
 
     memset(&ecfg, 0, sizeof(ecfg));
-    ecfg.control_rom_path = control_rom;
-    ecfg.pcm_rom_path     = pcm_rom;
+    ecfg.control_rom_path  = control_rom;
+    ecfg.pcm_rom_path      = pcm_rom;
+    ecfg.control_rom_path2 = control_rom2;
+    ecfg.pcm_rom_path2     = pcm_rom2;
     ecfg.output_rate      = rate;
     ecfg.max_partials     = partials;
     ecfg.reverb_enabled   = reverb;
@@ -252,6 +261,15 @@ int main(int argc, char **argv)
         MTP_LOGE("  own from hardware, put them in %s/, and try again;", roms_dir);
         MTP_LOGE("  or run with --engine fake to exercise everything but the sound.");
         return 1;
+    }
+
+    if (gain != 1.0) {
+        if (vt->set_gain) {
+            vt->set_gain(inst, (float)gain);
+            MTP_LOGI("master gain %.3f", gain);
+        } else {
+            MTP_LOGW("engine '%s' has no gain control; --gain ignored", vt->name);
+        }
     }
 
     /* ---- audio --------------------------------------------------------- */
@@ -331,6 +349,10 @@ int main(int argc, char **argv)
         st.parse_truncated = ctx.parser.stat_sysex_truncated;
         st.parse_aborted   = ctx.parser.stat_sysex_aborted;
         st.backpressure    = ctx.stats.engine_backpressure;
+        st.realtime_dropped = ctx.stats.realtime_dropped;
+        st.sink_stalls     = ctx.stats.sink_stalls;
+        st.startup_blocks  = ctx.stats.startup_blocks;
+        st.worst_block_us  = ctx.stats.worst_block_us;
         st.ring_peak       = desktop_midi_ring_peak();
         desktop_status_tick(&st);
 
@@ -343,6 +365,24 @@ int main(int argc, char **argv)
             if (!quiet_from) quiet_from = st.audio_us;
             if (st.audio_us - quiet_from > 2000000ull) break;
         }
+    }
+
+    /* Stop the notes before the device closes. Without this, Ctrl-C in the
+     * middle of a held chord tears the stream down mid-note: harmless on a
+     * module with a power switch, a wart here, and unacceptable on any build
+     * with a display and an encoder that can stop playback. mtp_engine.h's
+     * panic() exists for exactly this, and we render a couple of blocks after
+     * it so the silence actually reaches the device rather than being
+     * truncated away. */
+    if (mtp_render_panic(&ctx) == MTP_OK) {
+        unsigned drained = 0, tries = 0;
+        MTP_LOGI("panic: all notes off");
+        while (drained < ring && tries < 200u) {
+            unsigned k = mtp_render_pump(&ctx, 1);
+            if (k == 0u) { mtp_audio_wait(50000u); tries++; }
+            else drained += k;
+        }
+        st.blocks = ctx.stats.blocks;
     }
 
     desktop_audio_callback_stats(&st.dev_calls, &st.dev_max_frames,

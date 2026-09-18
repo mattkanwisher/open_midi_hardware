@@ -210,6 +210,12 @@ is a legitimate implementation of `operator new` on this target (§4.3).
 
 ### 4.1 What you must retarget
 
+The first version of this table was derived by reading the sources. The rows
+marked **(link)** were added afterwards from the undefined-symbol dump of an
+*actual* bare-metal link against Munt 2.8.3 — `emu/`, `arm-linux-gnueabihf-gcc`
+with `-nostdlib` — which is the only way to be sure the list is complete. See
+`emu/FINDINGS.md` § 8.3 and § 5.
+
 | Symbol | Why | What to do |
 |---|---|---|
 | `_sbrk` | newlib `malloc` | Hand it a fixed DDR3 arena. Sized from §7; nothing grows it after boot |
@@ -222,6 +228,12 @@ is a legitimate implementation of `operator new` on this target (§4.3).
 | `sin cos exp log log10 fmod` | `mmath.h`, `Tables.cpp` | newlib libm. All **double**; see §4.8 |
 | `rand` | `TVP.cpp:330`, on the render path | Supply your own. See §4.9 |
 | `div` | `Display.cpp:227` | Not on the hot path; newlib's is fine |
+| `abs` **(link)** | `TVP.cpp:88` | Same story as `div`, and it was missing from this table |
+| `stdout` **(link)** | `Synth.cpp:391-398` — and it is a **data** symbol, not a function | Needed *even though* the default `ReportHandler` is overridden, exactly as §4.7 predicts: the reference is compiled in whether or not the path runs. A `FILE *stdout` that the retarget layer owns |
+| `vfprintf` **(link)** | same site | §4.7 mentions `vprintf`; the call is `vfprintf(stdout, …)`. Either supply it or make `printDebug` unreachable at link time |
+| `sprintf` **(link)** | the `Part` constructor (`Part.cpp`) | §4.7 mentions `MidiStreamParser.cpp` only. `emu/src/printf.c` supplies a small one |
+| `errno` as **TLS**, plus `__aeabi_read_tp` **(link)** | glibc's `libm.a` | Only with a *glibc* toolchain (`arm-linux-gnueabihf-`) used as a bare-metal compiler: its libm reaches for a thread pointer. Supply a `__aeabi_read_tp` returning a static TLS block. **Not needed with newlib** — `arm-none-eabi-` does not have this problem, and this row is the price of the toolchain choice. `emu/FINDINGS.md` § 5.1 |
+| `__printf_chk` / `__fprintf_chk` / `__sprintf_chk` / `__vsnprintf_chk` **(link)** | `_FORTIFY_SOURCE`, which Ubuntu's GCC turns on by default at `-O2` | Do **not** implement these. Turn the fortification off: `-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0`. Otherwise every `printf`/`sprintf` in the library is rewritten into glibc-only symbols and the link fails on four names with no hint why. `emu/FINDINGS.md` § 5.2 |
 
 ### 4.2 Build flags for the library
 
@@ -245,8 +257,16 @@ And in the library's own CMake configuration:
 -DBUILD_TESTING=OFF
 ```
 
-plus removing `src/FileStream.cpp` from `libmt32emu_CPP_SOURCES`
-(`CMakeLists.txt:154`). See §4.5.
+**Do not add `-ffreestanding` to the C++ flags.** On the C side it is right and
+harmless. On the C++ side libstdc++'s `<cstdlib>` is guarded by
+`_GLIBCXX_HOSTED`, and `-ffreestanding` clears it, which hides `std::div` and
+`std::div_t` — which `Display.cpp:227` uses, and which this very table tells you
+to retarget. The failure is a compile error inside the library that looks
+nothing like a flags problem. `emu/FINDINGS.md` § 5.3. While you are there:
+do not reach for `-fno-use-cxa-atexit` either.
+
+What to do about `FileStream.cpp` is in §4.5, and the answer is **not** to edit
+upstream's `CMakeLists.txt`.
 
 ### 4.3 `operator new` with exceptions off
 
@@ -305,6 +325,30 @@ newlib link it drags in `std::basic_filebuf`, `std::ios_base`, locale facets and
 their static initialisers — measured in the undefined-symbol dump of the stock
 build as ~14 `std::` symbols and three vtables, none of which appear once the
 file is excluded.
+
+**How to exclude it, without touching the vendored tree.** Upstream offers no
+option to drop a source file, so the obvious move — delete `src/FileStream.cpp`
+from `libmt32emu_CPP_SOURCES` (`CMakeLists.txt:154`) — means editing a clone
+that every workstream in this project treats as read-only. Those two policies
+cannot both hold, and the vendored tree wins: a patched clone is a clone that
+silently reverts on the next `git pull` and takes the port with it.
+
+**So own the source list in your own build instead.** `emu/` does exactly this
+and it is the model: `tools/prepare-mt32emu.sh` stages the public headers into
+`build/mt32emu/include/` and generates a `config.h`, and the Makefile names the
+nineteen translation units it wants (`emu/Makefile`, `MT32EMU_CPP`) — upstream's
+list minus `FileStream.cpp` (this section) and `SampleRateConverter.cpp` (§4.6).
+Nothing under `bench/vendor/` is written to, objects land entirely in
+`emu/build/`, and the exclusion is a line in *our* Makefile where the next
+person will find it. Nineteen file names is a small price for a vendored tree
+that stays pristine.
+
+Worth knowing: it is only *compiling* `FileStream.cpp` that drags iostream in.
+`FileStream.h` may be included freely — `mt32emu.h` does — because the header's
+`<fstream>` costs nothing until something instantiates it. The `cmake`-driven
+builds (`port/host`, `desktop/`) therefore still use `add_subdirectory` on the
+unmodified upstream project and simply accept the extra object on a hosted
+platform, where it is free. Only the bare-metal link has to care.
 
 **The replacement is in the library already.** `File.h:57` defines `ArrayFile`:
 a `File` backed by a `const Bit8u*` plus a size. We read the ROM off SD into our

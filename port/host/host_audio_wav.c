@@ -1,11 +1,27 @@
 /* host_audio_wav.c - the audio sink, host stub: a WAV file.
  *
  * It models the target's ring honestly rather than just writing samples:
- * acquire() returns NULL when block_count blocks are outstanding, commit()
- * "plays" the oldest, and a virtual play cursor advances in real time only if
- * MTP_HOST_REALTIME is set. Without it the ring drains instantly, so a run is
- * as fast as the machine allows -- which is what you want for a regression
- * test and useless for a latency test. Say which one you are doing.
+ * acquire() returns NULL when block_count blocks are outstanding and commit()
+ * hands a block to a virtual play cursor. There are two modes, and the
+ * difference between them is not a detail:
+ *
+ *   FREE-RUNNING (the default). The play cursor is pulled by the renderer:
+ *   everything committed is immediately considered played. A run goes as fast
+ *   as the machine allows, which is what a regression test wants.
+ *   ***The ring CANNOT run dry in this mode, so mtp_audio_underruns() is
+ *   structurally incapable of being non-zero.*** It is not a measurement, and
+ *   an "underruns 0" assertion made here is a structural check that the
+ *   plumbing exists, not evidence that the render loop meets a deadline. The
+ *   harness prints "sink  free-running" so nobody has to know that from the
+ *   source. emu/FINDINGS.md 8.6 is where this was called out.
+ *
+ *   REAL TIME (--realtime). The play cursor advances against mtp_time_us64()
+ *   at the sample rate, whether or not the renderer kept up, and every block
+ *   period the cursor passes with nothing committed behind it is counted as an
+ *   underrun -- which is exactly what the DMA engine does on the board. In
+ *   this mode the counter is a measurement. It is still a weaker one than
+ *   emu/'s, because the "clock" is read by the same thread that renders rather
+ *   than being an interrupt from a free-running timer.
  *
  * SPDX-License-Identifier: 0BSD */
 
@@ -29,6 +45,8 @@ static uint32_t         g_underruns;
 static uint64_t         g_frames_written;
 static int              g_realtime;
 static uint64_t         g_t_start_us;
+static uint64_t         g_played_blocks;  /* blocks the cursor has passed    */
+static uint32_t         g_stall_us;       /* deliberate render-side delay    */
 
 static void wav_header(FILE *fp, uint32_t rate, uint16_t ch, uint32_t frames)
 {
@@ -61,6 +79,14 @@ static const char *g_path = "out.wav";
 void host_audio_set_path(const char *p) { g_path = p; }
 void host_audio_set_realtime(int on)    { g_realtime = on; }
 
+/* Test hook: burn this many microseconds inside every commit, as a stand-in
+ * for an engine that is too slow for its block period. It exists so that the
+ * underrun counter can be shown to fire -- a counter no test has ever seen go
+ * non-zero is a counter nobody should trust. See test.sh case 5. */
+void host_audio_set_stall_us(uint32_t us) { g_stall_us = us; }
+
+int host_audio_is_realtime(void) { return g_realtime; }
+
 mtp_status mtp_audio_open(const mtp_audio_config *cfg)
 {
     unsigned i;
@@ -79,7 +105,7 @@ mtp_status mtp_audio_open(const mtp_audio_config *cfg)
         if (!g_blocks[i]) return MTP_ERR_NOMEM;
     }
     g_write_ix = 0; g_queued = 0; g_acquired = NULL;
-    g_underruns = 0; g_frames_written = 0;
+    g_underruns = 0; g_frames_written = 0; g_played_blocks = 0;
     g_t_start_us = mtp_time_us64();
     MTP_LOGI("audio: %s, %u Hz, %u frames x %u blocks%s",
              g_path, g_cfg.sample_rate, g_cfg.frames_per_block,
@@ -100,20 +126,43 @@ void mtp_audio_close(void)
 
 const mtp_audio_config *mtp_audio_get_config(void) { return &g_cfg; }
 
-/* Advance the virtual play cursor. In non-realtime mode everything committed
- * is immediately considered played. */
+/* Advance the virtual play cursor.
+ *
+ * Free-running: everything committed is immediately considered played. The
+ * cursor is driven by the producer, so it can never overtake it and there is
+ * nothing to count. See the file header.
+ *
+ * Real time: the cursor is driven by the clock. Every block period it passes
+ * is a block the "DMA" played; if nothing had been committed for that period,
+ * the DMA played silence and that is an underrun, counted here exactly as
+ * emu/src/emu_audio.c counts it in its timer interrupt. Nothing counted it
+ * before -- g_underruns was written once at open() and never incremented --
+ * which made all four of test.sh's underrun assertions vacuous rather than
+ * three. */
 static void advance_play_cursor(void)
 {
+    uint64_t due, want, committed;
+
     if (!g_realtime) { g_queued = 0; return; }
-    {
-        uint64_t elapsed = mtp_time_us64() - g_t_start_us;
-        uint64_t due = elapsed * g_cfg.sample_rate / 1000000ull;
-        uint64_t played_blocks = due / g_cfg.frames_per_block;
-        uint64_t committed = g_frames_written / g_cfg.frames_per_block;
-        if (played_blocks >= committed) g_queued = 0;
-        else g_queued = (unsigned)(committed - played_blocks);
-        if (g_queued > g_cfg.block_count) g_queued = g_cfg.block_count;
+    if (g_cfg.frames_per_block == 0u || g_cfg.sample_rate == 0u) return;
+
+    due  = (mtp_time_us64() - g_t_start_us) * g_cfg.sample_rate / 1000000ull;
+    want = due / g_cfg.frames_per_block;
+    committed = g_frames_written / g_cfg.frames_per_block;
+
+    /* Nothing is played before the first commit: the ring holds silence and
+     * starting the clock against it would count start-up as failure. This is
+     * mtp_audio.h's start-of-stream rule, on the host side. */
+    if (committed == 0u) { g_t_start_us = mtp_time_us64(); g_queued = 0; return; }
+
+    while (g_played_blocks < want) {
+        if (g_played_blocks >= committed) g_underruns++;  /* played silence */
+        g_played_blocks++;
     }
+
+    g_queued = g_played_blocks >= committed
+             ? 0u : (unsigned)(committed - g_played_blocks);
+    if (g_queued > g_cfg.block_count) g_queued = g_cfg.block_count;
 }
 
 int16_t *mtp_audio_acquire(void)
@@ -128,6 +177,7 @@ int16_t *mtp_audio_acquire(void)
 void mtp_audio_commit(void)
 {
     if (!g_acquired) return;
+    if (g_stall_us) mtp_time_delay_us(g_stall_us);
     fwrite(g_acquired, sizeof(int16_t), g_cfg.frames_per_block * 2u, g_fp);
     g_frames_written += g_cfg.frames_per_block;
     g_write_ix = (g_write_ix + 1u) % g_cfg.block_count;
@@ -149,4 +199,8 @@ mtp_status mtp_audio_wait(uint32_t timeout_us)
     }
 }
 
-uint32_t mtp_audio_underruns(void) { return g_underruns; }
+uint32_t mtp_audio_underruns(void)
+{
+    advance_play_cursor();      /* so a run that ends late still counts it */
+    return g_underruns;
+}

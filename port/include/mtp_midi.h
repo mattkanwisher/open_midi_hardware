@@ -43,7 +43,16 @@ uint32_t mtp_midi_overruns(void);
 
 /* Monotonic count of framing/parity errors seen by the UART. On an
  * opto-isolated DIN input a non-zero value usually means the optocoupler, not
- * the software. */
+ * the software.
+ *
+ * TARGET ONLY. This counter is meaningful exactly where there is a real UART
+ * status register to read -- the T113's, and nowhere else. A POSIX tty cannot
+ * supply it: the only way to see framing and parity errors through termios is
+ * PARMRK, which reports them by *inserting* 0xFF 0x00 marker bytes into the
+ * data stream, which would corrupt MIDI. A host or desktop implementation must
+ * therefore return 0 here, and must NOT be "fixed" into enabling PARMRK. Zero
+ * from a host build means "not measurable", not "no errors"; zero from the
+ * T113 means no errors. */
 uint32_t mtp_midi_frame_errors(void);
 
 /* True once the source can produce no more bytes, ever. Always false on the

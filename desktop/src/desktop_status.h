@@ -27,9 +27,14 @@ typedef struct {
     uint32_t blocks;
     uint32_t underruns;
     unsigned queued;           /* ring occupancy right now               */
-    uint32_t min_queued;       /* lowest ever seen after a commit        */
+    /* Lowest occupancy seen after a commit, sampled only once the ring has
+     * first reached its target -- MTP_RENDER_MIN_QUEUED_NONE if it never did.
+     * See port/include/mtp_render.h for why the start-up commits are excluded. */
+    uint32_t min_queued;
+    uint32_t startup_blocks;   /* commits before the ring first filled    */
     uint32_t block_period_us;
     uint32_t worst_render_us;
+    uint32_t worst_block_us;   /* MIDI drain + render: the real budget    */
     uint32_t midi_bytes;
     uint32_t short_msgs;
     uint32_t sysex_msgs;
@@ -39,6 +44,8 @@ typedef struct {
     uint32_t parse_truncated;  /* sysex longer than 32 kB                */
     uint32_t parse_aborted;    /* sysex interrupted by a status byte     */
     uint32_t backpressure;     /* engine refused an event                */
+    uint32_t realtime_dropped; /* real-time bytes the engine refused      */
+    uint32_t sink_stalls;      /* mtp_audio_wait() timeouts               */
     uint32_t ring_peak;        /* peak MIDI FIFO occupancy, in bytes     */
     /* How the audio device behaved. On the T113 these describe the I2S DMA
      * completion interrupt; here they describe the OS, and the difference is

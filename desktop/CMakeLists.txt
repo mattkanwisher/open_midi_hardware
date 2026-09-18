@@ -33,8 +33,10 @@ add_executable(mt32-desktop
   # Above the seam: the same files the T113 will run.
   ${PORT_DIR}/src/mtp_midi_parser.c
   ${PORT_DIR}/src/mtp_render.c
-  # The engine seam, shared with port/host so the two cannot drift.
-  ${PORT_DIR}/host/engine_fake.c
+  # The portable reference engine, shared with port/host and emu/ so the three
+  # cannot drift. Nothing in it is host-specific, which is why it is in
+  # port/src and not port/host.
+  ${PORT_DIR}/src/engine_fake.c
   # Below the seam: this directory's whole reason to exist.
   src/desktop_audio_miniaudio.c
   src/desktop_midi.c

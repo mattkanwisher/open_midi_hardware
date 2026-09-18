@@ -117,6 +117,8 @@ grep_ok "generic timer is present and running" "timebase  *[0-9]* Hz" "$OUT/d.tx
 expect "demo short msgs"   "^short messages"   8  "$OUT/d.txt"
 expect "demo sysex"        "^sysex messages"   1  "$OUT/d.txt"
 expect_no_underruns "demo underruns" "$OUT/d.txt"
+expect "demo realtime dropped" "^realtime dropped" 0 "$OUT/d.txt"
+expect "demo sink stalls"  "^sink stalls"      0  "$OUT/d.txt"
 test -s "$OUT/demo.wav" && echo "ok   demo wav written" || \
   { echo "FAIL demo wav"; fail=1; }
 
@@ -131,16 +133,40 @@ grep_ok "bank parsed cleanly" \
 
 # The underrun assertion for the bank stream is made separately, at the block
 # size and ring depth port/DESIGN.md 2.2 actually specifies. That is not a
-# softening of the contract, it is the opposite: port/host's sink advances a
-# virtual play cursor and CANNOT underrun outside --realtime mode
-# (host_audio_wav.c:107 sets queued = 0), so its "bank underruns 0" is
-# structurally vacuous. Here the deadline is a timer interrupt and the
-# assertion is real -- and a 2-deep ring of 64-frame blocks holds 2.67 ms of
-# audio, which is less than this container's scheduling jitter. Asserting it at
-# 64/2 would be asserting how busy the machine is. See FINDINGS.md 8.7.
+# softening of the contract, it is the opposite: port/host's free-running sink
+# has a play cursor pulled by the renderer, so its ring cannot run dry and its
+# "bank underruns 0" is a structural check rather than a deadline (its test.sh
+# now labels those lines that way, and its case 5 proves the counter can fire
+# under --realtime). Here the deadline is a timer interrupt and the assertion
+# is real -- and a 2-deep ring of 64-frame blocks holds 2.67 ms of audio, which
+# is less than this container's scheduling jitter. Asserting it at 64/2 would
+# be asserting how busy the machine is. See FINDINGS.md 8.7.
 boot "$OUT/b3.txt" --midi bank --seconds 30
 expect_no_underruns "bank underruns (128-frame blocks, ring 3)" "$OUT/b3.txt"
 expect "bank sysex count again"  "^sysex messages"  64  "$OUT/b3.txt"
+expect "bank realtime dropped"   "^realtime dropped" 0  "$OUT/b3.txt"
+expect "bank sink stalls"        "^sink stalls"      0  "$OUT/b3.txt"
+
+# The safety margin, sampled only once the ring has first reached its target.
+# It used to include the commits made while the ring filled from empty, where
+# occupancy is 1 by construction, so it read 1 on every run that ever started
+# (desktop/FINDINGS.md 6.1). At ring 3 the loop targets 2 queued, so the
+# steady-state minimum here is 2 and a regression shows up as a 1.
+grep -q "^min ring occupancy  2 of 3  (steady state" "$OUT/b3.txt" \
+  && echo "ok   steady-state min ring occupancy is 2 of 3" \
+  || { echo "FAIL min ring occupancy: $(grep '^min ring occupancy' "$OUT/b3.txt")"; fail=1; }
+
+# worst_block_us -- the whole iteration, MIDI drain included -- was collected
+# by the render loop and printed by no harness at all (FINDINGS.md 8.5). It is
+# the number that has to fit in a block period, so it is now printed and it
+# must be at least as large as render() alone.
+wr=$(grep -E "^worst render" "$OUT/b3.txt" | awk '{print $3}')
+wb=$(grep -E "^worst block " "$OUT/b3.txt" | awk '{print $3}')
+if [ -n "$wr" ] && [ -n "$wb" ] && [ "$wb" -ge "$wr" ]; then
+    echo "ok   worst block ($wb us) >= worst render ($wr us), both reported"
+else
+    echo "FAIL worst block '$wb' vs worst render '$wr'"; fail=1
+fi
 
 # --- 3. a stream that is wrong in three ways --------------------------------
 boot "$OUT/x.txt" --midi bad --seconds 3
@@ -157,6 +183,7 @@ grep_ok "unterminated sysex aborted"  "sysex aborted 1"   "$OUT/x.txt"
 # "underruns 0" means the render loop met 375 real deadlines in a row.
 boot "$OUT/r.txt" --midi demo --seconds 1 --realtime
 expect_no_underruns "realtime underruns" "$OUT/r.txt"
+expect "realtime sink stalls" "^sink stalls" 0 "$OUT/r.txt"
 grep_ok "no spurious interrupts"  "irqs taken .*(spurious 0)" "$OUT/r.txt"
 
 # --- 5. bare-metal-only: the things the host harness cannot assert ----------

@@ -9,6 +9,13 @@
  * Its job is to make port/ runnable before ROMs, before mt32emu, before
  * silicon. It is not a preview of the sound.
  *
+ * It lives in port/src/, not port/host/, because there is nothing host-specific
+ * in it: no POSIX, no file I/O, one allocation at open. emu/ compiles this file
+ * unmodified for bare metal on a Cortex-A7. It is the portable reference engine
+ * that lets ANY implementation of port/include be exercised before a
+ * synthesiser exists, which is exactly the role docs/PLAN.md 0.5 puts above the
+ * seam.
+ *
  * SPDX-License-Identifier: 0BSD */
 
 #include "mtp_engine.h"
@@ -41,6 +48,7 @@ typedef struct {
 
 struct mtp_engine {
     uint32_t out_rate;
+    float    gain;          /* master output gain, 1.0 = unity */
     uint32_t rendered;      /* in FAKE_RATE ticks */
     double   frac;          /* output-rate to FAKE_RATE accumulator */
     voice    v[VOICES];
@@ -63,6 +71,7 @@ static mtp_status fake_open(const mtp_engine_config *cfg, mtp_engine **out)
     mtp_engine *e = (mtp_engine *)calloc(1, sizeof(*e));
     if (!e) return MTP_ERR_NOMEM;
     e->out_rate = cfg && cfg->output_rate ? cfg->output_rate : 48000u;
+    e->gain     = 1.0f;
     memcpy(e->lcd, "fake engine         ", 20);
     e->lcd[20] = 0;
     *out = e;
@@ -174,7 +183,7 @@ static void tick(mtp_engine *e, int16_t *dst)
         e->v[i].amp *= e->v[i].decay;
         if (e->v[i].amp < 0.0002f) e->v[i].active = 0;
     }
-    dst[0] = dst[1] = clip(acc * 32767.0f);
+    dst[0] = dst[1] = clip(acc * e->gain * 32767.0f);
 }
 
 static void fake_render(mtp_engine *e, int16_t *stereo, uint32_t frames)
@@ -207,6 +216,28 @@ static void fake_display(mtp_engine *e, char *dst21)
     memcpy(dst21, e->lcd, 21);
 }
 
+static void fake_set_gain(mtp_engine *e, float gain)
+{
+    if (gain < 0.0f) gain = 0.0f;
+    e->gain = gain;
+}
+
+/* Panic. Everything stops now: the voices are killed outright rather than
+ * released, and every event still sitting in the queue is thrown away, because
+ * a Note On queued behind the silence would restart a note a millisecond
+ * later. Same contract the real engine is held to -- no allocation, no
+ * blocking, callable between blocks. */
+static void fake_panic(mtp_engine *e)
+{
+    int i;
+    for (i = 0; i < VOICES; i++) {
+        e->v[i].active = 0;
+        e->v[i].amp    = 0.0f;
+    }
+    e->q_head    = e->q_tail;
+    e->sysex_used = 0u;
+}
+
 const mtp_engine_vtable mtp_engine_fake = {
     "fake",
     fake_open,
@@ -216,5 +247,7 @@ const mtp_engine_vtable mtp_engine_fake = {
     fake_short,
     fake_sysex,
     fake_render,
-    fake_display
+    fake_display,
+    fake_set_gain,
+    fake_panic
 };

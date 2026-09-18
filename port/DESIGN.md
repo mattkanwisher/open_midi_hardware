@@ -101,6 +101,38 @@ only two numbers in this design that should move in response to a measurement,
 and the harness in `host/` takes both as command-line arguments so the
 experiment is one command.
 
+**The second constraint, which is not the renderer's.** The paragraph above
+derives depth from the *producer's* slack: how late one render may be. That is
+only half of it. The ring must also cover the **consumer's service
+granularity** — the largest interval between two moments at which the consumer
+takes data — and that number belongs to the hardware, not to us. The two
+constraints are independent, and depth must satisfy both:
+
+```
+    ring depth  >=  1 + max(  worst render overrun          )  / block period
+                              (  worst consumer service gap )
+```
+
+This was measured, not reasoned about, by the two platform implementations:
+
+| Consumer | Service granularity | What depth it forces |
+|---|---|---|
+| T113 DMAC, linked descriptors | **one interrupt per descriptor**, i.e. exactly one block period, because the descriptor *is* the block (§2.3) | depth 3 is comfortable — which is why 3 is the number in the table above, and it is a property of the DMA engine rather than a guess |
+| QEMU `-M virt`, timer-driven sink (`emu/`) | one block period, same shape, because `emu/src/emu_audio.c` deliberately reproduces the DMAC's per-descriptor interrupt | depth 3 |
+| A desktop OS sound card (`desktop/`) | **~10 ms bursts**, four block periods at 128/48000, and worse on a loaded machine — the OS wakes the callback when it feels like it | depth 3 runs dry through no fault of the render loop; `desktop/test.sh` uses depth 8 and the summary explains itself whenever it happens |
+
+The desktop case is the instructive one. A 3-deep ring holds 8 ms; a backend
+that services on 10 ms cannot be fed by it *however fast the renderer is*, and
+underruns there say nothing about the RTF. That is why `desktop/`'s summary
+prints the worst observed request gap next to the ring's capacity in
+microseconds: the two numbers together say whether a dropout was a slow render
+or a late consumer, and only the first is a fault of the code above the seam.
+
+The practical consequence for the T113 is a **requirement on the I²S driver**:
+the DMAC must interrupt per descriptor, not per full-list wrap. A circular list
+of three descriptors that only interrupts on wrap has a service granularity of
+three block periods, and depth 3 then covers exactly nothing.
+
 ### 2.3 DMA and cache
 
 The T113's DMAC takes linked descriptors (`boot/vendor/freertos-t113/fw_main/dmac.h`
@@ -145,10 +177,29 @@ Three properties follow from that ordering, and they are the point:
    DMA ISR gives. Same five-line interface either way (§6).
 
 The safety margin is explicit and measurable: `mtp_render_stats.min_queued` is
-the lowest ring occupancy ever seen after a commit. If it never drops below 1,
-the loop never came within a block of an underrun. If it touches 0, you are one
-bad block from a click. The host harness prints it; the target should log it
-every few seconds.
+the lowest ring occupancy seen after a commit **once the ring has first reached
+`target_queued`**. That qualification is the whole of the number's value. The
+ring necessarily passes through occupancy 1 while it fills from empty at
+start-up, so a counter that included those first commits read 1 on every run
+that ever started, whatever happened afterwards — which is exactly what it did
+until `desktop/FINDINGS.md` § 6.1 caught it reporting `min 1 of 8` on a run
+whose live occupancy never went below 4. Start-up is now excluded and counted
+separately (`startup_blocks`); if the ring never reaches the target at all, the
+counter reports `n/a` rather than inventing a minimum, which is itself the
+answer — a free-running harness sink, or a loop that never caught up.
+
+Read it like this: at target occupancy 2, a steady-state minimum of 2 means the
+loop was never even one block late. A 1 means it was, once. A 0 means you are
+one bad block from a click. All three harnesses print it; the target should log
+it every few seconds.
+
+Two more counters exist for the same reason — because a failure nobody counts
+is a failure nobody sees. `worst_block_us` is the **whole** iteration, MIDI
+drain included, not just `render()`: it is what actually has to fit in a block
+period, and on the bank-dump stream it is several times `worst_render_us`
+because reassembling a 16 kB sysex is real work. `realtime_dropped` counts
+System Real Time bytes the engine refused; they carry no retry, so a dropped
+MIDI Clock used to be invisible by construction.
 
 **What the slack actually is.** With a 2.667 ms block period and RTF *r*, one
 block costs 2.667·*r* ms to render and the loop has 2.667·(1−*r*) ms spare per
@@ -339,6 +390,7 @@ because a decision above made them exist:
 
 ```
 machine        = cm32l      # or mt32; which ROM pair to open
+# control_rom2 / pcm_rom2: second half of a split dump, if you have halves
 sample_rate    = 48000      # 48000 or 32000; picks ACCURATE or COARSE
 block_frames   = 128
 ring_blocks    = 3
@@ -382,8 +434,8 @@ and the repository will never contain them. It must be a good experience.
 |---|---|
 | No card, or no FAT | Log it. Play nothing. Flash an LED in a distinctive pattern. **Do not hang** — a UART console still comes up, so `mt32.cfg` can be diagnosed over serial |
 | Card present, `mt32.cfg` missing | Use built-in defaults, log at INFO. Not an error: a card with only ROMs on it should work |
-| ROM file missing | Name the exact path that was not found, and list what *is* in `/roms`. "no such file" without the path is a bug report waiting to happen |
-| ROM present but not recognised | `makeROMImage` returns NULL or a NULL `ROMInfo`. Say so, and say the likely cause: a half image. `mt32emu` knows about `Mux0`/`Mux1` and `FirstHalf`/`SecondHalf` pairs (`ROMInfo.h:37-48`) — a 32 KB control ROM is one half of a pair and needs its partner, which `ROMImage::makeROMImage(File*, File*)` (`ROMInfo.h:108`) will merge. Support that, and say which half you were given |
+| ROM file missing | Name the exact path that was not found, **and then name which of the four ROM paths in §4.1 do exist**, by probing them with `mtp_storage_exists()`. "no such file" without the path is a bug report waiting to happen; "MT32_CONTROL.ROM not found; present: CM32L_CONTROL.ROM, CM32L_PCM.ROM" ends the support conversation in one line. Note what this is *not*: a directory listing. `mtp_storage.h` has no enumeration and is not getting one (§5) — the seam would grow a `readdir`-shaped call, a handle with a lifetime, and an iteration order, for a diagnostic that four `exists()` calls already give. Implemented in `host/engine_mt32emu.cpp` |
+| ROM present but not recognised | `makeROMImage` returns NULL or a NULL `ROMInfo`. Say so, and say the likely cause: a half image. `mt32emu` knows about `Mux0`/`Mux1` and `FirstHalf`/`SecondHalf` pairs (`ROMInfo.h:37-48`) — a 32 KB control ROM is one half of a pair and needs its partner, which `ROMImage::makeROMImage(File*, File*)` (`ROMInfo.h:108`) will merge. **Supported**: `mtp_engine_config` carries `control_rom_path2` and `pcm_rom_path2`, NULL for a whole image, and `host/engine_mt32emu.cpp` calls the two-argument `makeROMImage` when they are set. Two pointers on a config struct that is already there — no new call, no allocation, and the alternative was to delete the promise |
 | `machine = cm32l` but only MT-32 ROMs present | Fall back to MT-32 with a warning rather than failing. Note the trap, **read** at `ROMInfo.h:93-96`: the lower half of the CM-32L PCM ROM *is* the MT-32 PCM ROM, so the two are aliased and `makeROMImage` always prefers the full image |
 | Synth opens, ROMs fine | Log the descriptions `mt32emu` gives back (`ROMInfo::description`) so the console says "MT-32 Control v1.07 + MT-32 PCM ROM". That one line answers most support questions |
 
@@ -406,7 +458,7 @@ module that is bricked is not.
 | `mtp_storage.h` | mount/open/size/read/close/exists/load |
 | `mtp_time.h` | init/us/us64/delay_us |
 | `mtp_log.h` | level + one printf-style call |
-| `mtp_engine.h` | the synth seam: open/close/timebase/rendered/short/sysex/render |
+| `mtp_engine.h` | the synth seam: open/close/timebase/rendered/short/sysex/render, plus two optional calls a real device needs — `set_gain` (master volume; `Synth::setOutputGain`) and `panic` (flush the queue, all sound off, all notes off). Both may be NULL and callers check |
 | `mtp_midi_parser.h` | portable, not a platform service |
 | `mtp_render.h` | portable, not a platform service |
 
@@ -425,8 +477,9 @@ module that is bricked is not.
    such boundary to point at.
 
 **Small and honest.** Deliberately absent: no audio format negotiation beyond a
-config struct that fails loudly, no MIDI output, no file writing, no directory
-enumeration, no GPIO, no display, no callback registration, no opaque handles
+config struct that fails loudly, no MIDI output, no file writing, **no directory
+enumeration** (see §4.3 for the one place that was tempting and what was done
+instead), no GPIO, no display, no callback registration, no opaque handles
 where a single instance is the truth. Each of those is a real feature that
 someone may want later. Adding an abstraction for a feature that does not exist
 is how a 40-function interface becomes a 200-function one that nobody can
@@ -525,6 +578,22 @@ else in `include/` changes, `src/` does not change at all, and the render loop
 does not know which it is running on. The same is true of `mtp_midi_read`: a
 lock-free ring drained by the loop, or a message queue — the caller cannot tell.
 
+**What a timeout from it means, and what to do about it.** It returns
+`MTP_ERR_AGAIN` when the sink did not ask for a block in time. That is *not* a
+reason to stop rendering. A desktop device stalls legitimately — a suspend, a
+sample-rate change, an interface unplugged — and on the T113 one late DMA
+interrupt ending audio for ever, with one line on a console nobody is watching,
+is precisely the failure §4.3 says never to build. So `mtp_render_run()` counts
+the timeout in `stats.sink_stalls`, says so once, and keeps trying; it gives up
+only after two seconds with no block consumed at all, which is a dead sink
+rather than a late one, and it says that too. The counter is asserted at zero
+in all three suites, so a sink that stalls habitually cannot hide.
+
+`mtp_render_run()` is, despite its name, the **harness** loop: it also stops at
+`max_blocks` and on MIDI EOF, neither of which a device has. The target calls
+`mtp_render_pump()` inside its own superloop, and `mtp_render.h` now says so at
+the declaration rather than leaving the name to imply otherwise.
+
 Writing the interface first is what makes that true, which is why this
 workstream produced `include/` before it produced an opinion.
 
@@ -538,21 +607,41 @@ workstream produced `include/` before it produced an opinion.
 $ cd port/host && make && ./test.sh
 ok   demo short msgs (8)
 ok   demo sysex (1)
-ok   demo underruns (0)
+ok   demo underruns (structural) (0)
+ok   demo realtime dropped (0)
+ok   demo sink stalls (0)
+ok   a free-running sink reports no safety margin, not a fake one
 ok   demo wav written
 ok   bank sysex count (64)
 ok   bank short msgs (12)
-ok   bank underruns (0)
+ok   bank underruns (structural) (0)
+ok   bank realtime dropped (0)
 ok   bank parsed cleanly
 ok   bad sysex emitted (0)
 ok   bad short msgs (2)
-ok   bad underruns (0)
+ok   bad underruns (structural) (0)
 ok   3 orphan data bytes counted
 ok   oversize sysex refused
 ok   unterminated sysex aborted
-ok   realtime underruns (0)
+ok   realtime underruns (measured) (0)
+ok   realtime sink stalls (0)
+ok   min ring occupancy is steady state: 2 of 3, 1 start-up block(s) excluded
+ok   worst block (30 us) >= worst render (29 us), both reported
+ok   a renderer slower than real time is counted (580 underruns)
+ok   underruns make the harness exit non-zero (1)
+ok   a ring that never filled reports n/a, not a fake minimum
+ok   --gain 0 silences the engine (peak 23409 -> 0)
+ok   panic silences held notes (tail peak 5055 -> 0)
+ok   panic reached the engine
 all tests passed
 ```
+
+Note the words **structural** and **measured**. Outside `--realtime` this sink's
+play cursor is pulled by the renderer, so the ring cannot run dry and those
+three lines check that the counter is wired up, not that a deadline was met.
+Only the `--realtime` case measures anything, and the case after it exists to
+show that what it measures can go wrong: a renderer deliberately slower than
+real time must make the counter fire, or nobody should believe the zero.
 
 Also verified: the CMake build both with and without the real engine
 (`-DMT32EMU_SOURCE_DIR=../../bench/vendor/munt/mt32emu` builds `mt32emu` out of
@@ -570,7 +659,14 @@ wrong contents.
   on a 16 kB sysex reassembled across ~2000 audio blocks, and on three separate
   ways of being malformed;
 - the ring discipline holds: in paced (real-time) mode the loop stays two blocks
-  ahead for a second of audio with zero underruns and a minimum occupancy of 1;
+  ahead for a second of audio with zero underruns and a steady-state minimum
+  occupancy of 2 — which is the target, i.e. the loop was never even one block
+  late;
+- the underrun counter is capable of being non-zero, which is a different claim
+  from "it was zero" and is the one the harness used not to support;
+- the engine seam's gain and panic work through to the audio: `--gain 0`
+  produces digital silence, and a panic in the middle of a run of held notes
+  makes the rest of the wav digital silence;
 - the back-pressure path works, because the fake engine's small sysex store
   provokes it and it recovers with nothing dropped;
 - the `mt32emu` binding compiles, links and reports ROM failures the way §4.3
@@ -595,6 +691,7 @@ cd port/host
 make                                   # fake engine, no dependencies
 ./build/mtp_host --seconds 4           # built-in demo -> out.wav
 ./build/mtp_host --midi stream.syx --realtime --block 64 --ring 4
+./build/mtp_host --realtime --stall-us 4000   # make it underrun on purpose
 ./test.sh                              # the assertions above
 
 # with the real engine and real ROMs:

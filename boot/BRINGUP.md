@@ -616,8 +616,30 @@ kernel, `go`/`bootelf` hands over in **secure PL1 (SVC)**. That is the simplest
 state for a bare-metal payload — full access to the GIC distributor, CP15, and
 the secure-only registers the PSCI code touches. If we later use `bootm` with
 `CONFIG_ARMV7_NONSEC`, we would land in non-secure Hyp or SVC instead, which
-would break naive GIC setup. **Pin this down on hardware with a `mrs`/`mrc`
-dump in the first payload; it is a 10-line test and it removes a guess.**
+would break naive GIC setup.
+
+**The 10-line test this section asked for is written, and it runs.** It is not a
+thing to do one day; it is in the tree:
+
+- `emu/src/start.S` captures the entry state in its first instructions —
+  before anything is touched — into `emu_entry_state[]`: `CPSR` (so, the mode
+  and the I/F masks), `SCTLR` (so, whether the MMU and the D- and I-caches were
+  on at handover), `ID_PFR1` (so, whether the Security Extensions are
+  implemented at all), `ACTLR`, `VBAR`, `MIDR` (so, which core revision),
+  `CNTFRQ`, the loader's `r0`/`r1`/`r2` (so, the ATAG or FDT pointer `bootm`
+  passed), and the PC the image is actually executing at.
+- `emu/src/main.c`, `print_entry_state()`, prints it as the first thing on the
+  console, in words.
+
+Under QEMU `-M virt -cpu cortex-a7` it reports `mode SVC  I=1 F=1`, MMU and
+caches off, and **no Security Extensions at all** — so the secure/non-secure
+question does not arise there, and the emulator cannot answer it for us. It can
+answer it on silicon, unchanged: build `make uimage`, `bootm` it on a T113, and
+read one screen. That single boot settles four assumptions this port rests on —
+secure or non-secure handover, MMU and caches off as §4.1 claims, `CNTFRQ`
+really 24 MHz, and the image running at the address it was linked for. See
+`emu/FINDINGS.md` § 3 for the dump and § 8.8 and § 10.1 for what is left to do
+with it.
 
 ---
 

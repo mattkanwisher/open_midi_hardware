@@ -79,7 +79,7 @@ SRC_C   := src/mmu.c src/console.c src/gic.c src/timer.c src/semihost.c \
            src/emu_audio.c src/emu_midi.c src/emu_storage.c src/emu_log.c \
            src/midi_vectors.c src/main.c \
            $(PORT)/src/mtp_midi_parser.c $(PORT)/src/mtp_render.c \
-           $(PORT)/host/engine_fake.c
+           $(PORT)/src/engine_fake.c
 
 OBJ := $(addprefix $(BUILD)/,$(notdir $(SRC_ASM:.S=.o)) $(notdir $(SRC_C:.c=.o)))
 
@@ -125,9 +125,6 @@ $(BUILD)/%.o: src/%.c | $(BUILD)
 	$(CC) $(CFLAGS) $(INC) -c -o $@ $<
 
 $(BUILD)/%.o: $(PORT)/src/%.c | $(BUILD)
-	$(CC) $(CFLAGS) $(INC) -c -o $@ $<
-
-$(BUILD)/%.o: $(PORT)/host/%.c | $(BUILD)
 	$(CC) $(CFLAGS) $(INC) -c -o $@ $<
 
 $(BUILD)/engine_mt32emu.o: $(PORT)/host/engine_mt32emu.cpp $(MT32EMU_LIB) | $(BUILD)

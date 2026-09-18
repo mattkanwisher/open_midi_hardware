@@ -22,6 +22,8 @@
 
 void host_audio_set_path(const char *p);
 void host_audio_set_realtime(int on);
+void host_audio_set_stall_us(uint32_t us);
+int  host_audio_is_realtime(void);
 void host_midi_set_path(const char *p);
 void host_midi_set_paced(int on);
 void host_storage_set_root(const char *r);
@@ -46,6 +48,13 @@ static void usage(const char *argv0)
 "  --seconds S        stop after S seconds of audio (default 4)\n"
 "  --realtime         pace the sink and the MIDI source in real time\n"
 "  --lookahead N      schedule events N output frames ahead (default 0)\n"
+"  --control-rom2 P   second half of a split control ROM image\n"
+"  --pcm-rom2 P       second half of a split PCM ROM image\n"
+"  --gain G           engine master gain, 1.0 = unity (default 1.0)\n"
+"  --panic-at S       panic (all notes off) S seconds into the run\n"
+"  --stall-us N       burn N us in every commit: makes the sink miss its\n"
+"                     deadline on purpose, so the underrun counter can be\n"
+"                     shown to fire. Only meaningful with --realtime\n"
 "  -v                 verbose\n", argv0);
 }
 
@@ -83,8 +92,9 @@ int main(int argc, char **argv)
     const char *midi_path = NULL, *wav_path = "out.wav", *root = ".";
     const char *engine_name = "fake";
     const char *control_rom = NULL, *pcm_rom = NULL;
-    uint32_t rate = 48000, block = 128, ring = 3, lookahead = 0;
-    double seconds = 4.0;
+    const char *control_rom2 = NULL, *pcm_rom2 = NULL;
+    uint32_t rate = 48000, block = 128, ring = 3, lookahead = 0, stall_us = 0;
+    double seconds = 4.0, gain = 1.0, panic_at = -1.0;
     int realtime = 0, verbose = 0, i;
     char demo_path[512];
 
@@ -102,6 +112,11 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--engine") && i + 1 < argc)  engine_name = argv[++i];
         else if (!strcmp(argv[i], "--control-rom") && i+1<argc) control_rom = argv[++i];
         else if (!strcmp(argv[i], "--pcm-rom") && i + 1 < argc) pcm_rom = argv[++i];
+        else if (!strcmp(argv[i], "--control-rom2") && i+1<argc) control_rom2 = argv[++i];
+        else if (!strcmp(argv[i], "--pcm-rom2") && i + 1 < argc) pcm_rom2 = argv[++i];
+        else if (!strcmp(argv[i], "--gain") && i + 1 < argc)     gain = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--panic-at") && i + 1 < argc) panic_at = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--stall-us") && i+1<argc)     stall_us = (uint32_t)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--rate") && i + 1 < argc)    rate = (uint32_t)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--block") && i + 1 < argc)   block = (uint32_t)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--ring") && i + 1 < argc)    ring = (uint32_t)atoi(argv[++i]);
@@ -138,18 +153,27 @@ int main(int argc, char **argv)
 
     host_audio_set_path(wav_path);
     host_audio_set_realtime(realtime);
+    host_audio_set_stall_us(stall_us);
     host_midi_set_path(midi_path);
     host_midi_set_paced(realtime);
 
     memset(&ecfg, 0, sizeof(ecfg));
-    ecfg.control_rom_path = control_rom;
-    ecfg.pcm_rom_path     = pcm_rom;
+    ecfg.control_rom_path  = control_rom;
+    ecfg.pcm_rom_path      = pcm_rom;
+    ecfg.control_rom_path2 = control_rom2;
+    ecfg.pcm_rom_path2     = pcm_rom2;
     ecfg.output_rate      = rate;
     ecfg.max_partials     = 32;
     ecfg.reverb_enabled   = 1;
 
     s = vt->open(&ecfg, &inst);
     if (s != MTP_OK) { MTP_LOGE("engine open: %s", mtp_strerror(s)); return 1; }
+
+    if (gain != 1.0) {
+        if (vt->set_gain) { vt->set_gain(inst, (float)gain);
+                            MTP_LOGI("engine gain %.3f", gain); }
+        else MTP_LOGW("engine '%s' has no gain control; --gain ignored", vt->name);
+    }
 
     acfg.sample_rate      = rate;
     acfg.channels         = 2;
@@ -167,6 +191,20 @@ int main(int argc, char **argv)
     {
         uint32_t max_blocks = (uint32_t)(seconds * rate / block);
         uint64_t t0 = mtp_time_us64(), wall;
+
+        if (panic_at >= 0.0) {
+            /* Run to the panic point, silence everything, then run the rest.
+             * The second half of the wav is the assertion: a panic that did
+             * not silence the engine leaves audio in it. */
+            uint32_t upto = (uint32_t)(panic_at * rate / block);
+            if (upto > max_blocks) upto = max_blocks;
+            mtp_render_run(&ctx, upto);
+            if (mtp_render_panic(&ctx) == MTP_OK)
+                MTP_LOGI("panic at block %u", ctx.stats.blocks);
+            else
+                MTP_LOGW("engine '%s' has no panic; --panic-at ignored", vt->name);
+        }
+
         mtp_render_run(&ctx, max_blocks);
         wall = mtp_time_us64() - t0;
 
@@ -192,13 +230,29 @@ int main(int argc, char **argv)
                ctx.parser.stat_dropped_data, ctx.parser.stat_sysex_truncated,
                ctx.parser.stat_sysex_aborted);
         printf("engine back-pressure %u\n", ctx.stats.engine_backpressure);
+        printf("realtime dropped    %u\n", ctx.stats.realtime_dropped);
+        printf("sink                %s\n",
+               host_audio_is_realtime() ? "real time (underruns are measured)"
+                                        : "free-running (underruns are structural)");
         printf("underruns           %u\n", ctx.stats.underruns);
+        printf("sink stalls         %u\n", ctx.stats.sink_stalls);
         printf("worst render        %u us  (block period %.0f us)\n",
                ctx.stats.worst_render_us,
                1e6 * (double)block / (double)rate);
-        printf("min ring occupancy  %u of %u\n",
-               ctx.stats.min_queued == 0xFFFFFFFFu ? 0 : ctx.stats.min_queued,
-               ring);
+        /* The whole iteration, not just render(): MIDI drain plus render is
+         * what has to fit in a block period, and it is the closest thing this
+         * design has to an early warning about the Cortex-A7 gate. */
+        printf("worst block         %u us  (block period %.0f us)\n",
+               ctx.stats.worst_block_us,
+               1e6 * (double)block / (double)rate);
+        if (ctx.stats.min_queued == MTP_RENDER_MIN_QUEUED_NONE)
+            printf("min ring occupancy  n/a  (the ring never reached the "
+                   "target of %u; %u blocks committed)\n",
+                   ring - 1u, ctx.stats.blocks);
+        else
+            printf("min ring occupancy  %u of %u  (steady state, after %u "
+                   "start-up blocks)\n",
+                   ctx.stats.min_queued, ring, ctx.stats.startup_blocks);
         printf("wav                 %s\n", wav_path);
     }
 

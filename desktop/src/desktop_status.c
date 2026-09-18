@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: 0BSD */
 
 #include "desktop_status.h"
+#include "mtp_render.h"   /* MTP_RENDER_MIN_QUEUED_NONE */
 
 #include <stdio.h>
 #include <string.h>
@@ -97,12 +98,25 @@ void desktop_status_summary(const desktop_status_sample *s,
     printf("\n");
     printf("underruns            %u%s\n", s->underruns,
            s->underruns ? "   <-- audible dropouts" : "");
-    printf("min ring occupancy   %u of %u%s\n",
-           s->min_queued == 0xFFFFFFFFu ? 0u : s->min_queued, ring_blocks,
-           (s->min_queued != 0xFFFFFFFFu && s->min_queued == 0u)
-               ? "   <-- one bad block from a click" : "");
+    if (s->min_queued == MTP_RENDER_MIN_QUEUED_NONE)
+        printf("min ring occupancy   n/a   (the ring never reached its target "
+               "of %u; nothing to measure)\n",
+               ring_blocks ? ring_blocks - 1u : 0u);
+    else
+        printf("min ring occupancy   %u of %u   (steady state, after %u "
+               "start-up blocks)%s\n",
+               s->min_queued, ring_blocks, s->startup_blocks,
+               s->min_queued == 0u ? "   <-- one bad block from a click" : "");
     printf("worst block render   %u us of a %u us budget (%.2f of one block)\n",
            s->worst_render_us, s->block_period_us, worst_block_rtf);
+    /* render() alone is not the budget: the MIDI drain runs in the same
+     * iteration and has to fit in the same block period. This is the closest
+     * thing the design has to an early warning about the Cortex-A7 gate, and
+     * it was collected and never printed until now. */
+    printf("worst whole iteration %u us of a %u us budget (%.2f of one block)\n",
+           s->worst_block_us, s->block_period_us,
+           s->block_period_us ? (double)s->worst_block_us / (double)s->block_period_us
+                              : 0.0);
     printf("\n");
     printf("device requests      %u, up to %u frames each\n",
            s->dev_calls, s->dev_max_frames);
@@ -136,6 +150,8 @@ void desktop_status_summary(const desktop_status_sample *s,
     printf("parse: sysex > 32 kB %u\n", s->parse_truncated);
     printf("parse: sysex aborted %u\n", s->parse_aborted);
     printf("engine back-pressure %u\n", s->backpressure);
+    printf("realtime dropped     %u\n", s->realtime_dropped);
+    printf("sink stalls          %u\n", s->sink_stalls);
     printf("\n");
     printf("real-time factor     %.4f average, %.4f peak over a "
            "%u ms window\n", rtf_avg, g_rtf_peak, g_interval_ms);

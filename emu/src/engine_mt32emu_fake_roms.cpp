@@ -223,8 +223,22 @@ static void fr_render(mtp_engine *e, int16_t *stereo, uint32_t frames)
 static void fr_display(mtp_engine *e, char *dst21)
 { e->synth->getDisplayState(dst21, false); }
 
+static void fr_set_gain(mtp_engine *e, float g) { e->synth->setOutputGain(g); }
+
+/* Same panic as port/host/engine_mt32emu.cpp: flush what is queued first, or a
+ * Note On sitting behind the All Sound Off restarts a note straight after it. */
+static void fr_panic(mtp_engine *e)
+{
+    e->synth->flushMIDIQueue();
+    for (unsigned ch = 0; ch < 16u; ch++) {
+        e->synth->playMsgNow(0xB0u | ch | (120u << 8));
+        e->synth->playMsgNow(0xB0u | ch | (123u << 8));
+    }
+}
+
 extern "C" const mtp_engine_vtable mtp_engine_mt32emu_fakerom = {
     "mt32emu-fakerom",
     fr_open, fr_close, fr_timebase, fr_rendered,
-    fr_short, fr_sysex, fr_render, fr_display
+    fr_short, fr_sysex, fr_render, fr_display,
+    fr_set_gain, fr_panic
 };

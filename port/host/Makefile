@@ -18,12 +18,12 @@ LDLIBS  := -lm
 
 SRC_C := ../src/mtp_midi_parser.c \
          ../src/mtp_render.c \
+         ../src/engine_fake.c \
          host_audio_wav.c \
          host_midi_file.c \
          host_storage_posix.c \
          host_time_posix.c \
          host_log_stderr.c \
-         engine_fake.c \
          main.c
 
 OBJ := $(addprefix build/,$(notdir $(SRC_C:.c=.o)))

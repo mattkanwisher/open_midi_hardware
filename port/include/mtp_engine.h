@@ -4,7 +4,8 @@
  * render loop in src/mtp_render.c actually makes. It exists for exactly one
  * reason: so the whole port -- audio ring, MIDI parser, timing, storage --
  * can be built and run before mt32emu is linked in and before any ROMs exist.
- * host/engine_fake.c is the proof.
+ * src/engine_fake.c is the proof -- it is portable, and emu/ compiles it
+ * unmodified for bare metal.
  *
  * Everything maps onto mt32emu 2.8 without adaptation:
  *   short_msg()        -> Synth::playMsg(msg, timestamp)          (Synth.h:384)
@@ -32,6 +33,17 @@ typedef struct mtp_engine mtp_engine;
 typedef struct {
     const char *control_rom_path;  /* NULL for engines that need no ROMs */
     const char *pcm_rom_path;
+    /* Second half of a split ROM image, or NULL for a whole one.
+     *
+     * mt32emu knows about Mux0/Mux1 and FirstHalf/SecondHalf pairs
+     * (ROMInfo.h:37-48) and merges them with the two-argument
+     * ROMImage::makeROMImage(File*, File*) (ROMInfo.h:108). A 32 kB control
+     * ROM dump is one half of such a pair and is useless on its own, and
+     * dumps in the wild come that way, so DESIGN.md 4.3 promises to support
+     * them. It cannot be done with one path per ROM, which is why these
+     * exist -- two pointers, no allocation, no extra call. */
+    const char *control_rom_path2;
+    const char *pcm_rom_path2;
     uint32_t    output_rate;       /* Hz the engine must produce          */
     uint32_t    max_partials;      /* 32 = a real MT-32                   */
     int         reverb_enabled;
@@ -63,10 +75,35 @@ typedef struct {
 
     /* Optional, may be NULL: 20-char MT-32 LCD text, for a display later. */
     void       (*get_display)(mtp_engine *e, char *dst21);
+
+    /* Master output gain, linear, 1.0 = unity. Maps onto
+     * Synth::setOutputGain(float) (Synth.h:452). Optional, may be NULL for an
+     * engine that has no such control -- callers must check.
+     *
+     * It lives here rather than in mtp_audio.h on purpose: mt32emu applies
+     * gain inside the analogue-circuit emulation, where it belongs, and a
+     * multiply in the ring would be a second volume control fighting the
+     * first. mtp_audio.h says as much already ("mixing, volume -- the
+     * application's problem"). */
+    void       (*set_gain)(mtp_engine *e, float gain);
+
+    /* Panic: silence everything now. All notes off, all sound off, every
+     * pending event discarded. Optional, may be NULL.
+     *
+     * Anything that can be stopped needs this. A module with a power switch
+     * gets away without it; a desktop build that catches Ctrl-C mid-note, or
+     * any future build with a display and an encoder, does not. It is not
+     * "send CC 123 from the caller", because the caller cannot flush events
+     * that are already queued inside the engine, and a queued Note On behind
+     * the All Notes Off would restart the note.
+     *
+     * Must be callable from the render loop's context, between blocks. Must
+     * not allocate and must not block -- same contract as render(). */
+    void       (*panic)(mtp_engine *e);
 } mtp_engine_vtable;
 
 /* Engines available in this build. */
-extern const mtp_engine_vtable mtp_engine_fake;     /* host/engine_fake.c    */
+extern const mtp_engine_vtable mtp_engine_fake;     /* src/engine_fake.c     */
 #ifdef MTP_WITH_MT32EMU
 extern const mtp_engine_vtable mtp_engine_mt32emu;  /* host/engine_mt32emu.cpp */
 #endif

@@ -8,8 +8,8 @@ it, and a host implementation you can run today.
 | **[PORTING.md](PORTING.md)** | What `mt32emu` actually requires of a platform — C++ revision, STL surface, allocator behaviour, float versus fixed point, threads, file I/O — with the consequences for newlib + libstdc++, whether the two A7 cores help, and a measured memory budget |
 | **[DESIGN.md](DESIGN.md)** | The audio path and its latency budget, the 31250-baud MIDI parser, ROM and config loading, and the RT-Thread-versus-superloop call with the reasoning |
 | `include/` | The platform interface: audio sink, MIDI source, storage, timebase, log, plus the synth seam and the portable parser/render-loop headers |
-| `src/` | Portable port code — the MIDI parser and the render loop. The same files build for the host and for the T113 |
-| `host/` | A host implementation of the interface: the audio sink writes a WAV, the MIDI source reads a file, storage is the filesystem. Plus a fake synthesiser, so the whole structure runs with no ROMs and no `mt32emu` |
+| `src/` | Portable port code — the MIDI parser, the render loop, and `engine_fake.c`, the reference synthesiser that makes the whole structure runnable with no ROMs and no `mt32emu`. The same files build for the host, for armv7 under `qemu-user`, for bare metal under `emu/` and for the T113 |
+| `host/` | A host implementation of the interface: the audio sink writes a WAV, the MIDI source reads a file, storage is the filesystem. Plus `engine_mt32emu.cpp`, the only C++ in the port |
 
 ## Run it
 
@@ -18,6 +18,8 @@ cd host
 make            # fake engine; needs only a C compiler
 ./test.sh       # asserts on running status, sysex reassembly, ring discipline
 ./build/mtp_host --seconds 4        # built-in demo stream -> out.wav
+./build/mtp_host --realtime --stall-us 4000   # make the ring underrun on purpose
+./test-armv7.sh # the same suite, cross-built for Cortex-A7, under qemu-user
 ```
 
 With the real engine, built out of workstream A's clone (nothing under `bench/`

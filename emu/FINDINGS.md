@@ -376,6 +376,23 @@ source file outside `emu/` was touched.
 
 These are the changes this work says are needed.
 
+> **Status, 2026-09-18 (workstream G).** 8.1 to 8.5 and 8.8 are done: the
+> start-of-stream rule is in `mtp_audio.h`, `engine_fake.c` has moved to
+> `port/src/` and all four builds follow it, the retarget table and the
+> `FileStream.cpp` instruction in `PORTING.md` are corrected, `worst_block_us`
+> is printed and asserted by all three suites, and `mtp_render_run()` no longer
+> ends a run on one `mtp_audio_wait()` timeout. 8.6 was **partly declined**: the
+> suggested remedy — pacing the non-realtime host sink against `mtp_time_us()` —
+> was not taken, because it would make every regression case run in real time
+> and reintroduce exactly the container-jitter flakiness § 8.7 documents. What
+> was done instead is stronger in the direction that matters: `g_underruns`
+> turned out never to be incremented *at all*, so all four assertions were
+> vacuous rather than three; the `--realtime` path now counts underruns the way
+> `emu/`'s timer interrupt does, `port/host/test.sh` labels the free-running
+> cases "structural" in so many words, and a new case makes a deliberately slow
+> renderer produce underruns so the counter is proven to fire. The paragraphs
+> below are left as they were written.
+
 ### 8.1 `port/include/mtp_audio.h`: the start-of-stream underrun
 
 The header says "Opens the sink and starts the DMA. Until the first block is

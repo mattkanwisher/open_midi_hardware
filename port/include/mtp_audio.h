@@ -33,8 +33,30 @@ typedef struct {
     uint8_t  block_count;       /* ring depth, 3 on the target              */
 } mtp_audio_config;
 
-/* Opens the sink and starts the DMA. Until the first block is committed the
- * ring holds silence, so opening early is safe. */
+/* Opens the sink. Safe to call early: nothing above has to be ready.
+ *
+ * START-OF-STREAM RULE, and it is a rule, not advice. A consumer that begins
+ * running the instant open() returns is consuming an empty ring, and every
+ * consumer period between open() and the first commit() is a genuine "the
+ * application had not committed a block" event. Counting those makes
+ * mtp_audio_underruns() non-zero on a perfectly healthy boot, which destroys
+ * the one number the whole design is judged on.
+ *
+ * So an implementation must do one of two things, and should prefer the first:
+ *
+ *   1. Prime, then start. Do not begin consuming until the first commit().
+ *      That is what a real I2S DMA ring wants anyway -- fill the descriptors,
+ *      then enable the channel -- and it is what emu/src/emu_audio.c does
+ *      (the timer tick starts on the first commit, and every deadline after it
+ *      is absolute, so no time is lost).
+ *   2. If the consumer genuinely cannot be held off -- a host sound card whose
+ *      callback thread starts inside the device open -- then it must not count
+ *      an underrun before the first commit(). desktop/src/desktop_audio_
+ *      miniaudio.c takes this route, because miniaudio starts the device for
+ *      us.
+ *
+ * Either way the contract above the seam is the same: underruns counts only
+ * dropouts that the render loop could have prevented. */
 mtp_status mtp_audio_open(const mtp_audio_config *cfg);
 void       mtp_audio_close(void);
 

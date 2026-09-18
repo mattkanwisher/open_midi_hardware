@@ -37,8 +37,14 @@ static void on_message(const mtp_midi_msg *m, void *user)
         /* Clock, start, stop, active sensing. The MT-32 ignores all of them
          * except that Active Sensing timeout is a real feature of hardware
          * units; we do not emulate it. Pass them through so the engine can
-         * count them, but do not let them occupy a queue slot on failure. */
-        ctx->engine->short_msg(ctx->inst, m->msg, ts);
+         * count them, but do not let them occupy a retry slot on failure: a
+         * real-time byte is a point in time, and re-offering it a block later
+         * would be worse than dropping it.
+         *
+         * Dropping it silently, though, is how a synth that is losing MIDI
+         * Clock under load looks healthy. Count it. */
+        if (ctx->engine->short_msg(ctx->inst, m->msg, ts) != MTP_OK)
+            ctx->stats.realtime_dropped++;
         break;
 
     case MTP_MSG_SHORT:
@@ -113,7 +119,7 @@ mtp_status mtp_render_init(mtp_render_ctx *ctx,
     ctx->output_rate      = output_rate;
     ctx->target_queued    = target_queued;
     ctx->lookahead_frames = lookahead_frames;
-    ctx->stats.min_queued = 0xFFFFFFFFu;
+    ctx->stats.min_queued = MTP_RENDER_MIN_QUEUED_NONE;
     mtp_midi_parser_init(&ctx->parser, ctx->sysex_buf, MTP_SYSEX_MAX,
                          on_message, ctx);
     return MTP_OK;
@@ -150,7 +156,18 @@ unsigned mtp_render_pump(mtp_render_ctx *ctx, unsigned max_blocks)
             ctx->stats.worst_block_us = t2 - t0;
 
         queued = mtp_audio_queued();
-        if (queued < ctx->stats.min_queued) ctx->stats.min_queued = queued;
+
+        /* Only sample the safety margin once the ring has actually filled.
+         * From empty, the first commit leaves occupancy 1 by definition, so a
+         * counter that included start-up read 1 on every run that ever
+         * started -- the number was structurally incapable of saying anything
+         * about the steady state. See mtp_render.h. */
+        if (!ctx->primed) {
+            if (queued >= ctx->target_queued) ctx->primed = 1u;
+            else ctx->stats.startup_blocks++;
+        }
+        if (ctx->primed && queued < ctx->stats.min_queued)
+            ctx->stats.min_queued = queued;
 
         /* Once we are the configured distance ahead of the DMA, stop. Filling
          * the ring to the brim would only add latency; leaving a block free
@@ -162,21 +179,55 @@ unsigned mtp_render_pump(mtp_render_ctx *ctx, unsigned max_blocks)
     return produced;
 }
 
+mtp_status mtp_render_panic(mtp_render_ctx *ctx)
+{
+    if (!ctx || !ctx->engine) return MTP_ERR_INVAL;
+    /* Drop the staged sysex too: after a panic nobody wants a patch dump that
+     * was queued behind the notes we just silenced. */
+    ctx->retry_len = 0u;
+    if (!ctx->engine->panic) return MTP_ERR_INVAL;
+    ctx->engine->panic(ctx->inst);
+    return MTP_OK;
+}
+
+#define WAIT_TIMEOUT_US 5000u
+
 void mtp_render_run(mtp_render_ctx *ctx, uint32_t max_blocks)
 {
     uint32_t idle_blocks = 0;
+    uint32_t stalled_us  = 0;   /* consecutive time with the sink not moving */
+    int      said_so     = 0;
 
     while (ctx->stats.blocks < max_blocks) {
         unsigned n = mtp_render_pump(ctx, 8);
         if (n == 0u) {
             /* Ring is full. On the target this is a WFI; on the host the stub
              * returns immediately and we simply loop. */
-            if (mtp_audio_wait(5000u) != MTP_OK) {
-                MTP_LOGW("audio sink stalled");
-                break;
+            if (mtp_audio_wait(WAIT_TIMEOUT_US) != MTP_OK) {
+                /* The sink did not ask for a block in time. That is not a
+                 * reason to stop rendering -- see mtp_render.h. Count it, say
+                 * it once, and keep trying; a device main loop must survive a
+                 * suspend or a late interrupt, and this loop is the reference
+                 * for how that reads. */
+                ctx->stats.sink_stalls++;
+                stalled_us += WAIT_TIMEOUT_US;
+                if (!said_so) {
+                    MTP_LOGW("audio sink has not asked for a block in %u us; "
+                             "still rendering", (unsigned)WAIT_TIMEOUT_US);
+                    said_so = 1;
+                }
+                if (stalled_us >= MTP_RENDER_STALL_GIVEUP_US) {
+                    MTP_LOGE("audio sink dead: no block consumed in %u us, "
+                             "giving up after %u blocks",
+                             (unsigned)stalled_us, (unsigned)ctx->stats.blocks);
+                    break;
+                }
+            } else {
+                stalled_us = 0u;
             }
             continue;
         }
+        stalled_us = 0u;
         if (mtp_midi_eof()) {
             /* Source exhausted: keep rendering for a while so releases and
              * reverb tails finish, then stop. 1 second at block granularity. */

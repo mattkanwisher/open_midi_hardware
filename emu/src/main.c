@@ -244,8 +244,14 @@ int main(void)
     if (wav_path) emu_audio_set_wav(wav_path);
     emu_audio_set_sink(sink);
 
-    ecfg.control_rom_path = control_rom;
-    ecfg.pcm_rom_path     = pcm_rom;
+    ecfg.control_rom_path  = control_rom;
+    ecfg.pcm_rom_path      = pcm_rom;
+    /* Split-image ROM pairs (mtp_engine.h, port/DESIGN.md 4.3). This harness
+     * has no flag for them -- there is no card here to hold a half image -- but
+     * the fields must be initialised or the engine reads whatever is on the
+     * stack and tries to open a ROM at a garbage path. */
+    ecfg.control_rom_path2 = 0;
+    ecfg.pcm_rom_path2     = 0;
     ecfg.output_rate      = rate;
     ecfg.max_partials     = 32u;
     ecfg.reverb_enabled   = 1;
@@ -321,13 +327,27 @@ int main(void)
                g_ctx.parser.stat_sysex_truncated,
                g_ctx.parser.stat_sysex_aborted);
         printf("engine back-pressure %u\n", g_ctx.stats.engine_backpressure);
+        printf("realtime dropped    %u\n", g_ctx.stats.realtime_dropped);
+        printf("sink                timer/deadline (underruns are measured)\n");
         printf("underruns           %u\n", g_ctx.stats.underruns);
+        printf("sink stalls         %u\n", g_ctx.stats.sink_stalls);
         printf("worst render        %u us  (block period %u us)\n",
                g_ctx.stats.worst_render_us,
                (uint32_t)(((uint64_t)block * 1000000ull) / rate));
-        printf("min ring occupancy  %u of %u\n",
-               g_ctx.stats.min_queued == 0xFFFFFFFFu ? 0u : g_ctx.stats.min_queued,
-               ring);
+        /* The whole iteration -- MIDI drain plus render -- is what has to fit
+         * in a block period. Collected since the beginning, printed by nobody
+         * until now (emu/FINDINGS.md 8.5). */
+        printf("worst block         %u us  (block period %u us)\n",
+               g_ctx.stats.worst_block_us,
+               (uint32_t)(((uint64_t)block * 1000000ull) / rate));
+        if (g_ctx.stats.min_queued == MTP_RENDER_MIN_QUEUED_NONE)
+            printf("min ring occupancy  n/a  (the ring never reached the "
+                   "target of %u; %u blocks committed)\n",
+                   ring - 1u, g_ctx.stats.blocks);
+        else
+            printf("min ring occupancy  %u of %u  (steady state, after %u "
+                   "start-up blocks)\n",
+                   g_ctx.stats.min_queued, ring, g_ctx.stats.startup_blocks);
 
         /* ---- and what only the bare-metal run can say ---- */
         printf("stream              %s, %u bytes%s\n", emu_midi_name(),

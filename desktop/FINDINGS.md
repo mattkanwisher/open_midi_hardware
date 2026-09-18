@@ -243,6 +243,16 @@ is a change to a file this workstream does not own.
 
 Nothing in `port/` was modified. These are for whoever owns it.
 
+> **Status, 2026-09-18 (workstream G).** All seven are now addressed in `port/`,
+> and the four builds still pass. 6.1, 6.2, 6.4, 6.6 and 6.7 were implemented as
+> written; 6.5 is a header note. 6.3 was split: half-image ROM pairs gained
+> `control_rom_path2`/`pcm_rom_path2` on `mtp_engine_config` and the two-argument
+> `makeROMImage`, while the "list what is in `/roms`" promise was **corrected in
+> the document instead of implemented** — `DESIGN.md` § 4.3 now says to probe the
+> four ROM paths § 4.1 defines with `mtp_storage_exists()`, which gives the same
+> diagnostic without putting a `readdir` through the seam. The paragraphs below
+> are left as they were written; they are the evidence, not the current state.
+
 ### 6.1 `mtp_render_stats.min_queued` is polluted by start-up and reports 1 for ever
 
 `port/src/mtp_render.c` records `min_queued` after every commit, including the

@@ -11,7 +11,7 @@ operating system under it, and it passes the same conformance tests. The third
 will be the T113's.
 
 ```
-        port/src, port/include, port/host/engine_fake.c     ← the same code
+        port/src, port/include (engine_fake.c included)      ← the same code
    ┌──────────────┬──────────────────┬─────────────────┐       everywhere
    │  port/host   │      emu/        │   (T113, later) │
    │  POSIX       │  PL011, GIC-400, │  UART2, GIC-400,│
@@ -86,7 +86,7 @@ about how fast a Cortex-A7 is — see [FINDINGS.md](FINDINGS.md) § 2.
 | `tools/prepare-mt32emu.sh` | stages Munt's headers out of source; `bench/` is never written to |
 
 Nothing outside `emu/` is modified. `port/src`, `port/include` and
-`port/host/engine_fake.c` are compiled directly from where they live.
+`port/src/engine_fake.c` are compiled directly from where they live.
 
 ## The three audio sinks
 

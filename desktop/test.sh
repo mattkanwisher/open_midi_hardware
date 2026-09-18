@@ -63,6 +63,8 @@ grep -E "^messages" r2.txt | grep -q "8 short, 1 sysex, 1 realtime" \
   || { echo "FAIL demo parse: $(grep -E '^messages' r2.txt)"; fail=1; }
 expect "demo underruns"     "^underruns"           0 r2.txt
 expect "demo orphan data"   "^parse: orphan data"  0 r2.txt
+expect "demo realtime dropped" "^realtime dropped" 0 r2.txt
+expect "demo sink stalls"   "^sink stalls"         0 r2.txt
 python3 - <<'PY' || fail=1
 import wave, array, sys
 w = wave.open('demo.wav'); d = array.array('h'); d.frombytes(w.readframes(w.getnframes()))
@@ -93,6 +95,48 @@ expect "bank orphan data"   "^parse: orphan data"  0 r3.txt
 expect "bank truncated"     "^parse: sysex > 32 kB" 0 r3.txt
 expect "bank aborted"       "^parse: sysex aborted" 0 r3.txt
 expect "bank underruns"     "^underruns"           0 r3.txt
+expect "bank realtime dropped" "^realtime dropped" 0 r3.txt
+
+# The safety margin. It is only meaningful once the ring has actually filled:
+# from empty the first commit leaves occupancy 1 by definition, so the counter
+# used to read 1 on every run that ever started while the live readout showed 4
+# or 5 (desktop/FINDINGS.md 6.1). It now reports the steady state, or "n/a" if
+# the ring never got there, and neither of those is ever a bare 1 here.
+python3 - r3.txt <<'PYMQ' || fail=1
+import re, sys
+t = open(sys.argv[1]).read()
+if re.search(r'^min ring occupancy\s+n/a', t, re.M):
+    print("ok   min ring occupancy reported honestly as n/a")
+    sys.exit(0)
+m = re.search(r'^min ring occupancy\s+(\d+) of (\d+)\s+\(steady state, after '
+              r'(\d+) start-up blocks\)', t, re.M)
+if not m:
+    print("FAIL min ring occupancy line is not in steady-state form")
+    sys.exit(1)
+mq, ring, startup = (int(x) for x in m.groups())
+# The invariant, not a value: at least one commit excluded from the sample.
+if startup >= 1 and 1 <= mq <= ring:
+    print("ok   min ring occupancy is steady state: %d of %d, %d start-up "
+          "block(s) excluded" % (mq, ring, startup))
+else:
+    print("FAIL min %d of %d with %d start-up blocks excluded"
+          % (mq, ring, startup))
+    sys.exit(1)
+PYMQ
+
+# worst_block_us was collected by the render loop and printed by nobody
+# (emu/FINDINGS.md 8.5). It is the whole iteration -- MIDI drain plus render --
+# which is what actually has to fit in a block period.
+python3 - r3.txt <<'PYWB' || fail=1
+import re, sys
+t = open(sys.argv[1]).read()
+r = int(re.search(r'^worst block render\s+(\d+) us', t, re.M).group(1))
+b = int(re.search(r'^worst whole iteration\s+(\d+) us', t, re.M).group(1))
+if b >= r:
+    print("ok   worst whole iteration (%d us) >= worst render (%d us)" % (b, r))
+else:
+    print("FAIL whole iteration %d us < render %d us" % (b, r)); sys.exit(1)
+PYWB
 
 # --- 4. a stream that is wrong in three ways -------------------------------
 python3 - <<'PY'
@@ -137,6 +181,44 @@ grep -E "^messages" r5.txt | grep -q "9 short, 1 sysex" \
   || { echo "FAIL smf parse: $(grep -E '^messages' r5.txt)"; fail=1; }
 expect "smf underruns"      "^underruns"            0 r5.txt
 expect_grep "smf ends the run by itself" "^audio produced" r5.txt
+
+# --- 5b. gain and panic, the two controls the engine seam grew -------------
+# desktop/FINDINGS.md 6.4: a desktop wants a master volume, and anything that
+# can be stopped wants an all-notes-off on the way out. Both are now on the
+# vtable, and both are asserted through the audio rather than through a log
+# line: --gain 0 must produce digital silence, and the blocks rendered after
+# the panic must be silent even though the notes were never released.
+$BIN $COMMON --seconds 1 --gain 0 --midi-fifo - --tap-wav g0.wav < demo.syx > r5b.txt 2>&1
+python3 - <<'PYGAIN' || fail=1
+import wave, array, sys
+def peak(p):
+    w = wave.open(p); d = array.array('h')
+    d.frombytes(w.readframes(w.getnframes())); w.close()
+    return max(abs(x) for x in d) if d else 0
+loud, quiet = peak('demo.wav'), peak('g0.wav')
+if loud > 1000 and quiet == 0:
+    print("ok   --gain 0 silences the engine (peak %d -> %d)" % (loud, quiet))
+else:
+    print("FAIL gain: peak %d -> %d" % (loud, quiet)); sys.exit(1)
+PYGAIN
+
+# Note ons with no note offs: the engine is still sounding when the run ends.
+python3 -c "open('hold.syx','wb').write(bytes([0x90,60,100, 64,100, 67,100, 72,100]))"
+$BIN $COMMON --seconds 1 --midi-fifo - --tap-wav hold.wav < hold.syx > r5c.txt 2>&1
+expect_grep "panic runs on the way out" "panic: all notes off" r5c.txt
+python3 - <<'PYPANIC' || fail=1
+import wave, array, sys
+w = wave.open('hold.wav'); n = w.getnframes(); ch = w.getnchannels()
+d = array.array('h'); d.frombytes(w.readframes(n)); w.close()
+tail = d[-512*ch:]                      # the last four blocks, after the panic
+body = d[:n*ch//2]
+if max(abs(x) for x in body) > 100 and max(abs(x) for x in tail) == 0:
+    print("ok   held notes are silenced before the device closes")
+else:
+    print("FAIL panic: body peak %d, tail peak %d"
+          % (max(abs(x) for x in body), max(abs(x) for x in tail)))
+    sys.exit(1)
+PYPANIC
 
 # --- 6. the real engine, which must refuse to invent a ROM -----------------
 if $BIN --help | grep -q mt32emu; then
