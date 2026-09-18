@@ -1,11 +1,26 @@
-# U-Boot defconfig sketch for an mt32-t113 board: Allwinner T113-i with
-# EXTERNAL DDR3.  Drop into u-boot/configs/ and build with
-#   make CROSS_COMPILE=arm-linux-gnueabihf- t113i_mt32_defconfig
-#   make CROSS_COMPILE=arm-linux-gnueabihf- -j$(nproc)
-# Output: u-boot-sunxi-with-spl.bin
+# U-Boot defconfig for an mt32-t113 board: Allwinner T113-i with EXTERNAL DDR3.
 #
-# UNVERIFIED ON HARDWARE.  Provenance for every non-obvious line is below.
-# Generate the DRAM block yourself with:
+#   tools/build-uboot.sh
+#
+# which clones mainline U-Boot, copies this file and ../dts/sun8i-t113i-mt32.dts
+# into the checkout, and builds.  Output: u-boot-sunxi-with-spl.bin, 490824
+# bytes.  By hand it is:
+#   cp configs/t113i_mt32_defconfig      u-boot/configs/
+#   cp dts/sun8i-t113i-mt32.dts          u-boot/dts/upstream/src/arm/allwinner/
+#   make -C u-boot CROSS_COMPILE=arm-linux-gnueabihf- t113i_mt32_defconfig
+#   make -C u-boot CROSS_COMPILE=arm-linux-gnueabihf- -j$(nproc)
+#
+# THIS BUILDS.  Validated 2026-09-18 against u-boot commit
+#   211de43d0f954a00a490220c1aac9db298287c40   (v2026.10-rc4-34-g211de43d0f)
+# with arm-linux-gnueabihf-gcc 13.3.0.  Every symbol below exists in that tree
+# and the resulting SPL carries these DRAM numbers (BRINGUP.md section 2.9).
+#
+# STILL UNVERIFIED ON HARDWARE.  Nothing here has been near a T113.  What is
+# verified is that it compiles, that every Kconfig symbol resolves, and that
+# CONFIG_DRAM_SUNXI_TPR13 reaches the SPL binary as a literal.
+#
+# Provenance for every non-obvious line is below.  Generate the DRAM block
+# yourself with:
 #   scripts/ddrpara.py kconfig --preset mt32-t113
 #
 # Baseline: u-boot configs/mangopi_mq_r_defconfig (the mainline T113-S3 board,
@@ -20,11 +35,13 @@ CONFIG_ARCH_SUNXI=y
 # SUNXI_GEN_NCAT2, SUNXI_NEW_PINCTRL and DRAM_SUN20I_D1.
 CONFIG_MACH_SUN8I_R528=y
 
-# Our own devicetree. Start by copying
-#   arch/arm/dts/sun8i-t113s-mangopi-mq-r-t113.dts
-# or the Tronlong one from nickfox-taterli/t113-uboot
-#   arch/arm/dts/sun8i-t113i-minievm.dts
-# and fixing the console UART pinmux, MMC0 pins and regulators for our board.
+# Our own devicetree: ../dts/sun8i-t113i-mt32.dts, which tools/build-uboot.sh
+# copies into u-boot/dts/upstream/src/arm/allwinner/.  It includes mainline's
+# sun8i-t113s.dtsi (same die) and adds the console, MIDI UART, microSD and
+# I2S pin choices.  Those pin choices are PROPOSALS TO WORKSTREAM B, not
+# readings of a schematic, and the DTS says so on every one of them.
+# (An earlier revision of this line named a devicetree that did not exist,
+# which is one of the two reasons this defconfig did not build.)
 CONFIG_DEFAULT_DEVICE_TREE="allwinner/sun8i-t113i-mt32"
 
 CONFIG_SPL=y
@@ -61,13 +78,24 @@ CONFIG_DRAM_SUNXI_TPR11=0x770000
 CONFIG_DRAM_SUNXI_TPR12=0x2
 
 # TPR13 feature bits.  0x34050100 vs the T113-S3's 0x34000100 adds:
-#   bit 16 - internal ZQ only
-#   bit 18 - force AC remapping table 7 instead of the efuse-selected table
+#   bit 16 - internal ZQ only (dram_sun20i_d1.c:1013, :1272, :1279, :1351)
+#   bit 18 - force AC remapping table 7 (:686).  The driver tests
+#            `dram_tpr13 & 0xc0000`, so bit 18 OR bit 19 does this; the first
+#            revision of this comment said "bit 18" alone.
+# Both sets also carry bits 8, 26, 28 and 29, of which mainline reads 8, 28
+# and 29 and never reads 26.  `scripts/ddrpara.py decode --preset mt32-t113`
+# prints the whole decode with line citations.
+#
 # Bit 18 matters most: on the co-packaged parts an efuse at SID+0x28[11:8]
 # selects the address/command pin swizzle that matches the internal bond wires.
 # On a part with external DDR3 that efuse means nothing useful, so the
 # external-DDR3 board forces a known table.  OUR PCB MUST BE ROUTED TO MATCH
-# WHICHEVER TABLE WE SET HERE - see ../BRINGUP.md section 2, "AC remapping".
+# WHICHEVER TABLE WE SET HERE - see ../BRINGUP.md section 2.5, which now
+# derives (rather than assumes) that table 0 is the straight-through one, and
+# notes that NO tpr13 bit can select table 0 - only the efuse, or a one-line
+# driver patch, can.  Expect to change this line once the efuse has been read:
+#   xfel read32 0x03006228
+#   scripts/ddrpara.py acremap --preset mt32-t113 --fuse <nibble>
 CONFIG_DRAM_SUNXI_TPR13=0x34050100
 
 # Minimum DRAM the SPL will accept before declaring failure.

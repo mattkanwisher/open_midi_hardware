@@ -67,7 +67,7 @@ if [ "$want" = all ] || [ "$want" = bootm ]; then
 	run "bootm  (mainline defaults: ARMV7_NONSEC=y, ARMV7_VIRT=y)" \
 		"mmc dev 0" \
 		"mmc read 0x42000000 $PROBE_BLK_HEX $BLKS" \
-		"bootm 0x42000000"
+		'bootm 0x42000000 - ${fdtcontroladdr}'
 fi
 
 if [ "$want" = all ] || [ "$want" = bootm-sec ]; then
@@ -75,7 +75,7 @@ if [ "$want" = all ] || [ "$want" = bootm-sec ]; then
 		"mmc dev 0" \
 		"mmc read 0x42000000 $PROBE_BLK_HEX $BLKS" \
 		"setenv bootm_boot_mode sec" \
-		"bootm 0x42000000"
+		'bootm 0x42000000 - ${fdtcontroladdr}'
 fi
 
 if [ "$want" = all ] || [ "$want" = go ]; then

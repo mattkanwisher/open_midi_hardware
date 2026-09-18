@@ -133,6 +133,7 @@ a project-level decision, not a feature request.
 |---|---|---|
 | **CON-1** | A UART console MUST come up before the SD card is touched, and MUST stay up in every failure state | `[read]` `port/DESIGN.md` § 4.3 |
 | **CON-2** | The console is the only diagnostic channel this device has. Anything a user might need to know MUST be visible there | `[inferred]` — follows from NG-4 |
+| **CON-3** | **The console MUST be on UART0 at PE2/PE3, or UART3 at PB6/PB7. Nothing else.** This is a schematic constraint, not a software preference. Mainline's SPL sets its console pinmux in C, not from the device tree, and has exactly those two arms for this SoC — anything else is a `#error`. U-Boot *proper* is device-tree driven and will happily use other pins, so a board wired elsewhere boots with a **silent SPL and a talkative U-Boot**: you lose exactly the DRAM training output you need at the moment DRAM is what failed | `[read]` `arch/arm/mach-sunxi/board.c:160-195`, `boot/BRINGUP.md` § 6.2 |
 
 ### 2.5 Boot media
 
@@ -182,7 +183,9 @@ power
 
 | ID | Requirement | Evidence |
 |---|---|---|
-| **PWR-1** | Handover from the bootloader **MUST be `bootm`, not `go`**. Only `bootm` calls `cleanup_before_linux()`, so only `bootm` hands over with the MMU and D-cache off. Using `go` gives the firmware an inherited MMU state it did not configure | `[read]` `boot/BRINGUP.md` |
+| **PWR-1** | Handover from the bootloader **MUST be `bootm`, not `go`** | **`[measured]` 2026-09-18**, no longer inferred. A probe payload booted under a real sunxi U-Boot reports SCTLR `0x00c5187d` after `go` — MMU, D-cache and I-cache all **on** — against `0x00c50078` after `bootm`, all off. `cleanup_before_linux()` also turns the I-cache off, which the first reading missed |
+| **PWR-1a** | The image **MUST be wrapped as `-O linux`.** `bootm` dispatches on `ih_os`, and `-O u-boot` takes `do_bootm_standalone`, a plain call — as bad as `go` | `[read]` `boot/bootm_os.c:529-533` |
+| **PWR-1b** | **The firmware may be entered in non-secure Hyp mode, not SVC**, and must handle both. Mainline U-Boot defaults `ARMV7_NONSEC=y` and `ARMV7_VIRT=y` for sunxi (`ARMV7_BOOT_SEC_DEFAULT` is `default y if ARCH_TEGRA`, so off here), and its secure monitor selects Hyp on a virtualisation-capable core — which the A7 is. **Measured: `bootm` gives CPSR `0x600001da`, mode `0x1a`.** A `msr cpsr_c` *cannot* leave Hyp; the write is ignored. Startup code must detect Hyp and `eret` out of it | **`[measured]`** — and both startup files got this wrong until 2026-09-18. See § 9 trap 15 |
 | **PWR-2** | The synth is opened **before** the DAC starts (step 5 before step 6), so the first block of audio out is real rather than a ramp from silence | `[read]` `port/DESIGN.md` § 4.1 |
 | **PWR-3** | The console banner MUST appear before any step that can fail | `[read]` |
 | **PWR-4** | On a successful open, the console MUST log the ROM descriptions `mt32emu` returns — e.g. `MT-32 Control v1.07 + MT-32 PCM ROM`. That one line answers most support questions | `[read]` `ROMInfo::description` |
@@ -376,7 +379,17 @@ way by someone in this project, and each has a citation.
     is the cheapest strong test available here. `-ffp-contract=off` on every ARM
     build. `port/PORTING.md` § 4.2.
 
-15. **Do not commit ROMs, and do not commit the vendored upstreams.**
+15. **You may not be in the mode you think you are.** A bare-metal payload
+    started by mainline U-Boot on sunxi arrives in **non-secure Hyp**, and the
+    usual `mrs`/`orr #0x13`/`msr cpsr_c` idiom silently does nothing there —
+    the ARM ARM makes a mode write that would leave Hyp ignored. The symptom is
+    the nastiest kind: no fault, no message, exceptions vectoring through HVBAR
+    instead of VBAR, and every "per-mode" stack aliased to the Hyp stack.
+    U-Boot's own `armv7/start.S:93-99` guards the same instruction with
+    `teq r1, #0x1a`. Detect Hyp and `eret` out; do not rely on a bootloader
+    config, because then the config is load-bearing and nobody will remember.
+
+16. **Do not commit ROMs, and do not commit the vendored upstreams.**
     `bench/vendor/`, `boot/vendor/` and `port/vendor/` are gitignored. Munt is
     cloned at a recorded commit, not submoduled, because the LGPL boundary is
     cleaner if upstream is fetched rather than embedded.

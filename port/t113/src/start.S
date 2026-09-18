@@ -4,7 +4,8 @@
  * cleanup_before_linux() row) hands over with:
  *
  *     MMU off, D-cache off and flushed, I-cache state unspecified,
- *     IRQ and FIQ masked, ARM state, PL1, SVC mode.
+ *     IRQ and FIQ masked, ARM state. The mode may be SVC *or non-secure Hyp*
+ *     -- mainline U-Boot's sunxi default is Hyp. Step 3 normalises it.
  *
  * Secure or non-secure is NOT part of that contract and is the one thing
  * boot/BRINGUP.md 4.4 says to pin down on hardware. Step 2 below records the
@@ -31,6 +32,9 @@
 
     .syntax unified
     .arm
+    /* elr_hyp and eret in step 3 need the virtualisation extension enabled
+     * for the assembler; the A7 implements it. */
+    .arch_extension virt
 
 /* ---------------------------------------------------------------- vectors */
     .section .vectors, "ax"
@@ -84,8 +88,38 @@ _start:
     mrc     p15, 0, r6, c0, c0, 5       /* MPIDR                            */
     str     r6, [r5, #44]
 
-    /* 3. Known CPSR: SVC, interrupts masked, alignment faults off. */
+    /* 3. Known CPSR: SVC, interrupts masked, alignment faults off.
+     *
+     *    We may arrive in Hyp mode (0x1a), not SVC. Mainline U-Boot defaults
+     *    ARMV7_NONSEC=y and ARMV7_VIRT=y for sunxi -- ARMV7_BOOT_SEC_DEFAULT
+     *    is `default y if ARCH_TEGRA`, so n here -- and boot_jump_linux()
+     *    goes through _do_nonsec_entry and the secure monitor, which selects
+     *    HYP_MODE on a virtualisation-capable core. The A7 is one.
+     *    Measured on a real sunxi U-Boot under QEMU: bootm gives CPSR
+     *    0x600001da, mode 0x1a. See boot/BRINGUP.md 4.4.
+     *
+     *    A `msr cpsr_c` cannot leave Hyp -- the ARM ARM makes a mode write
+     *    that would exit Hyp ignored, so the old code here fell through with
+     *    the mode unchanged, vectored through HVBAR instead of VBAR, and gave
+     *    all five "per-mode" stacks the same Hyp stack. Nothing faults and
+     *    nothing works, which is the worst way to be wrong.
+     *
+     *    U-Boot's own armv7/start.S:93-99 guards the same instruction with
+     *    `teq r1, #0x1a` for this exact reason. We go further and leave Hyp
+     *    properly, by ERET, so the payload is correct whether the loader
+     *    hands us Hyp or SVC and no bootloader config is load-bearing. */
     cpsid   if
+    mrs     r0, cpsr
+    and     r1, r0, #0x1F
+    cmp     r1, #0x1A                   /* Hyp?                             */
+    bne     1f
+    bic     r0, r0, #0x1F
+    orr     r0, r0, #0xD3               /* SVC, I and F masked              */
+    msr     spsr_cxsf, r0
+    adr     r0, 1f
+    msr     elr_hyp, r0
+    eret                                /* Hyp -> SVC, lands at 1:          */
+1:
     mrs     r0, cpsr
     bic     r0, r0, #0x1F
     orr     r0, r0, #0x13

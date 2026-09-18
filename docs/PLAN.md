@@ -10,7 +10,8 @@ All four workstreams have reported once. What is settled and what is not:
 | | |
 |---|---|
 | **The gate is open.** No real-time factor has been measured, because MT-32 ROMs are copyrighted and absent here. `bench/` builds for host and Cortex-A7 and is ready to run | **blocking everything** |
-| DRAM parameters: resolved. GPL source in mainline U-Boot, density auto-detected, four Kconfig numbers separate external from co-packaged DDR3 | closed |
+| DRAM parameters: resolved **and now compiled**. GPL source in mainline U-Boot, density auto-detected, four Kconfig numbers separate external from co-packaged DDR3. `boot/` builds three U-Boot targets green, ours included, and the defconfig that was published here did not build until this pass | closed |
+| **Console pins gate copper.** Mainline's SPL does its console pinmux in C with exactly two arms — UART0 on **PE2/PE3** or UART3 on **PB6/PB7**; anything else is `#error`. U-Boot proper is DT-based and *will* drive PB8/PB9, so a board wired there gets a silent SPL and a talkative U-Boot — losing precisely the DRAM debug output you need when DRAM fails | **new, constrains the schematic** |
 | DDR3 address/command routing: straight through, no swizzle, with the reasoning and the one-command efuse check in `hw/HARDWARE.md` § 5.4 | closed, pending that check |
 | Power-up sequencing: **unread**. The vendor warns wrong timing destroys the part. Four PDFs to fetch, none reachable from this session | **gates copper** |
 | Platform layer: designed, and its host harness builds and passes its own tests | closed for now |
@@ -115,9 +116,13 @@ assemble the LFBGA and at what setup cost, and what the board comes to at qty 5.
 ### C. `boot/` — bring-up path
 What actually boots a T113-i with *external* DDR3: mainline U-Boot (T113 support
 landed in v2024.01), awboot, xboot, and the vendor route. **Answered** in `boot/BRINGUP.md`: mainline U-Boot
-v2024.01 or later, payload wrapped with `mkimage` and started with `bootm` rather
-than `go` (only `bootm` runs `cleanup_before_linux()`, so only `bootm` hands over
-with the MMU and D-cache off), developed over `xfel` without touching an SD card.
+v2024.01 or later, payload wrapped with `mkimage` **as `-O linux`** and started
+with `bootm` rather than `go` — measured 2026-09-18, not merely read: after `go`
+SCTLR reads `0x00c5187d` with the MMU and both caches on, after `bootm`
+`0x00c50078` with them off. **And the payload arrives in non-secure Hyp unless
+`CONFIG_ARMV7_BOOT_SEC_DEFAULT=y`**, which is the qualification the first
+reading missed and which sent two `start.S` files astray. Developed over `xfel`
+without touching an SD card.
 Bare metal on day one, taking the FreeRTOS T113 port's GIC, timer, MMU and SMHC
 scaffolding, which already runs on this silicon under a clean licence, and
 writing the one driver nobody has: I²S with DMA.
