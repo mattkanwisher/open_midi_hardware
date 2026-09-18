@@ -70,6 +70,9 @@ uint32_t emu_audio_ur_bursts(void);
 uint32_t emu_audio_ur_worst_run(void);
 uint32_t emu_audio_ur_recover(void);
 uint32_t emu_audio_period_us(void);
+uint32_t emu_audio_stall_underruns(void);
+uint32_t emu_audio_stall_queued(void);
+uint32_t emu_audio_stall_us(void);
 uint32_t emu_audio_service_gap_us(void);
 const midi_expect *emu_midi_expect(void);
 
@@ -379,6 +382,21 @@ int main(void)
                "recovery %u periods)\n",
                emu_audio_ur_bursts(), emu_audio_ur_worst_run(),
                emu_audio_ur_recover());
+        if (stall_us) {
+            uint32_t per = emu_audio_period_us() ? emu_audio_period_us() : 1u;
+            uint32_t n   = stall_us / per;
+            uint32_t q   = emu_audio_stall_queued();
+            uint32_t want = n > q ? n - q : 0u;
+            printf("stall injected      %u us before block %u "
+                   "(%u periods, ring held %u)\n", stall_us, stall_at, n, q);
+            printf("stall underruns     %u  (arithmetic says %u)\n",
+                   emu_audio_stall_underruns(), want);
+            printf("stall accounted     %s\n",
+                   emu_audio_stall_underruns() == want ? "EXACT" : "OFF BY "
+                   "MORE THAN ZERO");
+            printf("stall jitter        %u  (underruns outside the stall)\n",
+                   g_ctx.stats.underruns - emu_audio_stall_underruns());
+        }
         printf("sink service gap    %u us  (block period %u us)\n",
                emu_audio_service_gap_us(), emu_audio_period_us());
 

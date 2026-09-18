@@ -292,6 +292,8 @@ static void usage(const char *argv0) {
 "  --src-quality Q  fastest|fast|good|best                     (default good)\n"
 "  --renderer R     int | float                                (default int)\n"
 "  --reverb on|off                                             (default on)\n"
+"                   off is done the hardware's way, System Area reverb time\n"
+"                   and level both zero -- see the note in the source\n"
 "  --analog MODE    digital|coarse|accurate|oversampled        (default coarse)\n"
 "  --max-partials N synth partial ceiling                      (default 32)\n"
 "\n"

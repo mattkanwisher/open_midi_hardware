@@ -253,6 +253,296 @@ else
     fi
 fi
 
+# ===========================================================================
+#  The cases below are emu/'s own. port/host/test.sh has no counterpart for
+#  any of them, because each one needs either a deadline that can actually be
+#  missed, a second core, or an engine that can be made to misbehave.
+# ===========================================================================
+
+# --- 8. the parser against an independent model of its own contract --------
+# tools/gen_vectors.py computes, from port/include/mtp_midi_parser.h and
+# sharing no code with port/src/mtp_midi_parser.c, what each stream must
+# produce. The image compares and prints MATCH or MISMATCH. This is the
+# assertion that is not a number pasted from a previous run.
+# Each stream is paced at 31250 baud, so the run has to be at least as long as
+# the stream's wire time or the expectation table -- which describes the WHOLE
+# stream -- does not apply. Wire time is bytes x 10 / 31250; the numbers below
+# are that, rounded up, plus two seconds for the release tails. `bad` is the
+# one that matters: it is 40 116 bytes, 12.84 s of wire, and at six seconds its
+# 40 kB oversize sysex has not finished arriving, so "sysex truncated 1" has
+# not happened yet. (That is exactly how this table got written: the first
+# version used six seconds for everything and `bad` failed.)
+vec_seconds() {
+    case "$1" in
+        bad)     echo 15 ;;   # 12.84 s of wire
+        bank)    echo 8  ;;   #  5.25 s
+        panic)   echo 4  ;;   #  1.60 s
+        *)       echo 3  ;;   # demo/rtsysex/runstat/trunc: under 0.3 s
+    esac
+}
+for v in demo bank bad rtsysex runstat panic trunc; do
+    boot "$OUT/mv_$v.txt" --engine probe --midi "$v" --realtime \
+         --seconds "$(vec_seconds $v)"
+    if grep -q "parser vs contract  MATCH" "$OUT/mv_$v.txt"; then
+        echo "ok   '$v' parses exactly as the contract says"
+    else
+        echo "FAIL '$v': parser and contract disagree"
+        grep -E "^(parser:|expected|parser vs)" "$OUT/mv_$v.txt" | sed 's/^/     /'
+        fail=1
+    fi
+done
+
+# --- 9. sysex CONTENT, not just sysex count --------------------------------
+# The rtsysex vector wedges nine System Real Time bytes into the middle of a
+# 254-byte Roland patch dump. The dump the engine receives must be the dump
+# that went onto the wire, byte for byte -- which no counter can express, so
+# the probe engine hashes what it is handed (FNV-1a) and the hash is compared
+# with the one the model computed.
+for v in demo bank rtsysex; do
+    grep_ok "'$v' sysex payload is byte-exact at the engine" \
+            "sysex vs contract   MATCH" "$OUT/mv_$v.txt"
+done
+grep_ok "real-time bytes survive a sysex (9 of them)" \
+        "parser: short 2 sysex 1 realtime 9" "$OUT/mv_rtsysex.txt"
+
+# --- 10. running status across the MIDI read boundary ----------------------
+# mtp_render.c reads in 64-byte batches; the runstat vector is built so a
+# 2-byte running-status message straddles every one of those boundaries.
+expect "running status across read boundaries" "^short messages" 400 "$OUT/mv_runstat.txt"
+grep_ok "a real-time byte between key and velocity is transparent" \
+        "parser: short 400 sysex 0 realtime 1" "$OUT/mv_runstat.txt"
+
+# --- 11. the cable was pulled mid-sysex ------------------------------------
+# The stream ends inside a sysex and nothing ever terminates or aborts it.
+# Correct is to emit nothing and to count nothing: the parser must not flush a
+# half patch into a synth that will checksum it, and must not invent a
+# "truncated" or "aborted" event for something that merely stopped.
+expect "truncated stream: no sysex emitted"  "^sysex messages" 0 "$OUT/mv_trunc.txt"
+grep_ok "truncated stream: nothing miscounted" \
+        "orphan data 0, sysex truncated 0, sysex aborted 0" "$OUT/mv_trunc.txt"
+
+# --- 12. underrun recovery: does it resync, or does it drift for ever? -----
+# A deliberate producer stall, timed in whole block periods, injected before a
+# named block. The image separates underruns that happened DURING the stall
+# (the experiment) from underruns outside it (this container), so the
+# assertion is exact rather than statistical.
+#
+# Two claims are being tested, and they are port/DESIGN.md 2.4's:
+#   (a) the ring absorbs exactly (depth - 1) block periods of overrun
+#   (b) after it does not, the loop is back at target occupancy within one
+#       sink period -- it resyncs, it does not walk the clock
+PER=2666            # 128 frames at 48 kHz
+for r in 2 3 4 8; do
+    absorb=$(( (r - 1) * PER ))
+    boot "$OUT/st_ok_$r.txt" --engine probe --midi bank --realtime --seconds 4 \
+         --block 128 --ring "$r" --stall-at 400 --stall-us "$absorb"
+    n=$(grep -E "^stall underruns" "$OUT/st_ok_$r.txt" | awk '{print $3}')
+    if [ "$n" = "0" ]; then
+        echo "ok   ring $r absorbs a $(( r - 1 ))-period overrun with no dropout"
+    else
+        echo "FAIL ring $r: $(( r - 1 )) periods of overrun caused $n dropouts"
+        fail=1
+    fi
+    over=$(( (r + 2) * PER ))
+    boot "$OUT/st_bad_$r.txt" --engine probe --midi bank --realtime --seconds 4 \
+         --block 128 --ring "$r" --stall-at 400 --stall-us "$over"
+    grep_ok "ring $r: a $(( r + 2 ))-period overrun is accounted for exactly" \
+            "stall accounted     EXACT" "$OUT/st_bad_$r.txt"
+    b=$(grep -E "^underrun bursts" "$OUT/st_bad_$r.txt" | awk '{print $3}')
+    rec=$(grep -E "^underrun bursts" "$OUT/st_bad_$r.txt" | \
+          sed -n 's/.*recovery \([0-9]*\) periods.*/\1/p')
+    if [ "$rec" -le 2 ] 2>/dev/null; then
+        echo "ok   ring $r: back at target occupancy $rec period(s) after the dropout"
+    else
+        echo "FAIL ring $r: took $rec periods to recover (bursts $b)"
+        fail=1
+    fi
+done
+
+# --- 13. an all-notes-off storm, and where it starts costing notes ---------
+# mtp_render.c retries a sysex the engine refuses (one slot) but DROPS a short
+# message it refuses -- stats.engine_backpressure counts it and nothing
+# recovers it. A dropped All Notes Off is a note that hangs until the box is
+# power-cycled, so this is the most user-visible failure the layer has.
+#
+# At DIN MIDI's 31250 baud the margin is enormous and the assertion is that
+# nothing is lost. The second case deliberately exceeds the limit, so that the
+# limit is demonstrated to exist rather than assumed not to matter.
+boot "$OUT/panic31k.txt" --engine probe --engine-queue 64 --midi panic \
+     --realtime --baud 31250 --seconds 4
+lost=$(grep -E "^short msgs lost" "$OUT/panic31k.txt" | awk '{print $4}')
+acc=$(grep -E "^engine saw" "$OUT/panic31k.txt" | awk '{print $9}')
+if [ "$lost" = "0" ] && [ "$acc" = "1664" ]; then
+    echo "ok   1664-message panic storm at 31250 baud: nothing dropped"
+else
+    echo "FAIL panic storm at 31250 baud lost $lost of 1664 (engine took $acc)"
+    fail=1
+fi
+grep_ok "every All Sound Off / Reset / All Notes Off reached the engine" \
+        "1536 panic CCs" "$OUT/panic31k.txt"
+# 64 events per 2.667 ms block is 24000 messages/s; a 3-byte message is 30
+# bits, so the queue is exceeded above ~720 kbaud. Assert that it IS exceeded
+# at 800 kbaud -- if this ever passes, the drop path has been changed and the
+# 31250-baud margin needs recomputing.
+boot "$OUT/panic800k.txt" --engine probe --engine-queue 64 --midi panic \
+     --realtime --baud 800000 --seconds 4
+lost=$(grep -E "^short msgs lost" "$OUT/panic800k.txt" | awk '{print $4}')
+if [ "$lost" -gt 0 ] 2>/dev/null; then
+    echo "ok   the short-message drop limit exists and is where predicted"
+    echo "     (800000 baud, 64-deep engine queue: $lost of 1664 lost;"
+    echo "      at 31250 baud the same queue loses none -- a 23x margin)"
+else
+    echo "FAIL a 64-deep queue did not overflow at 800000 baud: the"
+    echo "     back-pressure path has changed and 13's margin is now unknown"
+    fail=1
+fi
+
+# --- 14. sysex back-pressure: the one-slot retry is enough -----------------
+# port/src/mtp_render.c stashes exactly one refused sysex and retries it next
+# block. With a one-event engine queue every one of the 64 patch dumps has to
+# go through that path, and all 64 must still arrive, intact.
+boot "$OUT/bp1.txt" --engine probe --engine-queue 1 --midi bank --realtime --seconds 8
+expect "all 64 dumps survive a 1-deep engine queue" "^sysex messages" 64 "$OUT/bp1.txt"
+grep_ok "and their bytes are still exact after the retries" \
+        "sysex vs contract   MATCH" "$OUT/bp1.txt"
+bp=$(grep -E "^engine back-pressure" "$OUT/bp1.txt" | awk '{print $3}')
+if [ "$bp" -gt 0 ] 2>/dev/null; then
+    echo "ok   the retry path was actually taken ($bp times)"
+else
+    echo "FAIL the retry path was never taken, so case 14 asserted nothing"
+    fail=1
+fi
+
+# --- 15. the consumer's service granularity sets a second ring bound -------
+# FINDINGS.md 7 found this and did not put a number on it. The image now
+# measures the gap between the consumer's completion interrupts directly, so
+# the rule can be stated: depth >= ceil(service_gap / block_period) + 1.
+if $QEMU -M virt -device help 2>/dev/null | grep -q virtio-sound-device; then
+    VF="-net none -global virtio-mmio.force-legacy=false"
+    VF="$VF -audiodev wav,id=snd0,path=$OUT/gap.wav"
+    VF="$VF -device virtio-sound-device,audiodev=snd0"
+    vrun() {   # vrun <log> <ring>
+        timeout "$TIMEOUT" $QEMU $QFLAGS $VF -semihosting-config \
+          "enable=on,target=native,arg=x,arg=--engine,arg=probe,arg=--midi,arg=demo,arg=--seconds,arg=2,arg=--sink,arg=virtio,arg=--block,arg=128,arg=--ring,arg=$2" \
+          -kernel "$ELF" 2>&1 | tr -d '\r' > "$1" || true
+    }
+    vrun "$OUT/gap3.txt" 3
+    vrun "$OUT/gap8.txt" 8
+    gap=$(grep -E "^sink service gap" "$OUT/gap8.txt" | awk '{print $4}')
+    u3=$(grep -E "^underruns" "$OUT/gap3.txt" | awk '{print $NF}')
+    u8=$(grep -E "^underruns" "$OUT/gap8.txt" | awk '{print $NF}')
+    need=$(( gap / 2666 + 2 ))
+    if [ "$gap" -gt 6000 ] 2>/dev/null; then
+        echo "ok   consumer service interval measured: ${gap} us, so this"
+        echo "     consumer needs ring >= $need at 128 frames (DESIGN 2.2 says 3)"
+    else
+        echo "FAIL could not measure the consumer's service interval (${gap} us)"
+        fail=1
+    fi
+    if [ "$u3" -gt "$u8" ] 2>/dev/null; then
+        echo "ok   and the shallow ring starves while the deep one does not"
+        echo "     (ring 3: $u3 dry periods, ring 8: $u8, min occupancy 1 in both --"
+        echo "      the renderer was never behind; this is purely the consumer)"
+    else
+        echo "FAIL ring 3 ($u3) did not starve more than ring 8 ($u8)"
+        fail=1
+    fi
+    grep_ok "renderer was never behind at ring 3 (min occupancy 1)" \
+            "min ring occupancy  1" "$OUT/gap3.txt"
+else
+    echo "skip service-granularity rule (this QEMU has no virtio-sound-device)"
+fi
+
+# --- 16. the dual-core hazard --------------------------------------------
+# port/PORTING.md 5 says mt32emu's MIDI queue synchronises with volatile alone.
+# This boots a second core and runs two litmus tests across the two of them.
+# What is asserted is NOT "no violations" -- that would be asserting a property
+# of QEMU. What is asserted is that the experiment ran and that the control
+# case fired, because a litmus test that observes nothing AND cannot observe
+# anything is worth nothing. See src/smp.c and FINDINGS.md.
+#
+# -icount is deliberately absent: it forces single-threaded TCG, in which the
+# two cores never run at the same time and the ping-pong makes 25 iterations in
+# five seconds (measured). MTTCG is required for the experiment to mean
+# anything at all.
+SMPFLAGS="-M virt -cpu cortex-a7 -smp 2 -m 256 -nographic -nodefaults"
+SMPFLAGS="$SMPFLAGS -serial mon:stdio -no-reboot -accel tcg,thread=multi"
+timeout "$TIMEOUT" $QEMU $SMPFLAGS -semihosting-config \
+    "enable=on,target=native,arg=x,arg=--engine,arg=probe,arg=--midi,arg=demo,arg=--seconds,arg=0.2,arg=--smp,arg=hvc,arg=--smp-mp,arg=200000,arg=--smp-sb,arg=200000" \
+    -kernel "$ELF" 2>&1 | tr -d '\r' > "$OUT/smp.txt" || true
+if grep -q "second core         alive" "$OUT/smp.txt"; then
+    echo "ok   a second core boots from reset (PSCI CPU_ON over HVC)"
+    mpi=$(grep -E "^mp iterations" "$OUT/smp.txt" | awk '{print $3}')
+    mpv=$(grep -E "^mp violations" "$OUT/smp.txt" | awk '{print $3}')
+    sbr=$(grep -E "^sb rounds" "$OUT/smp.txt" | awk '{print $3}')
+    sbz=$(grep -E "^sb both-zero" "$OUT/smp.txt" | awk '{print $3}')
+    if [ "$mpi" -ge 200000 ] 2>/dev/null; then
+        echo "ok   message-passing litmus ran $mpi times across the two cores"
+    else
+        echo "FAIL message-passing litmus only managed $mpi iterations"; fail=1
+    fi
+    # The control. If SB never fires, this environment is sequentially
+    # consistent and the MP result says nothing whatsoever; the suite must not
+    # let that pass silently.
+    if [ "$sbz" -gt 0 ] 2>/dev/null; then
+        echo "ok   the control fired: $sbz of $sbr store-buffering rounds were"
+        echo "     not sequentially consistent, so the harness CAN see reordering"
+    else
+        echo "FAIL the store-buffering control observed nothing in $sbr rounds:"
+        echo "     this environment is sequentially consistent, so the"
+        echo "     message-passing result below proves nothing. Do not read it."
+        fail=1
+    fi
+    if [ "$mpv" = "0" ]; then
+        echo "ok   message-passing violations: 0 -- and that is a statement"
+        echo "     about TCG on a TSO host, NOT about a Cortex-A7. See"
+        echo "     FINDINGS.md: the reordering mt32emu's queue is exposed to"
+        echo "     is store-store, which an x86-64 host does not do and TCG"
+        echo "     does not add. This test cannot clear that queue."
+    else
+        echo "ok   message-passing violations: $mpv -- the hazard fired, which"
+        echo "     settles port/PORTING.md 5 in the affirmative"
+    fi
+else
+    echo "FAIL the second core did not start; the dual-core case asserted nothing"
+    sed -n '/--- smp ---/,$p' "$OUT/smp.txt" | sed 's/^/     /'
+    fail=1
+fi
+
+# --- 17. the real synthesiser through the whole suite ----------------------
+# Case 7 above runs mt32emu on one stream. These run it on all of them, so
+# that "the conformance suite passes bare metal" means the suite and not one
+# case of it.
+if grep -q "this image has: fake)" "$OUT/m.txt"; then
+    echo "skip mt32emu full sweep (image built without it; use: make mt32emu)"
+else
+    for v in demo bank bad rtsysex runstat trunc; do
+        boot "$OUT/me_$v.txt" --engine mt32emu-fakerom --midi "$v" --realtime \
+             --seconds "$(vec_seconds $v)"
+        grep_ok "mt32emu '$v': parser contract holds with the real engine" \
+                "parser vs contract  MATCH" "$OUT/me_$v.txt"
+        g=$(grep -E "^heap grown by run" "$OUT/me_$v.txt" | awk '{print $(NF-1)}')
+        if [ "$g" = "0" ]; then
+            echo "ok   mt32emu '$v': zero heap growth while rendering"
+        else
+            echo "FAIL mt32emu '$v': render path allocated $g B"; fail=1
+        fi
+    done
+    # port/DESIGN.md 2.4's instantaneous margin, with the real engine: a single
+    # block that takes longer than its own playing time must not be audible,
+    # because the ring absorbs it.
+    boot "$OUT/me_burst.txt" --engine mt32emu-fakerom --midi bank --seconds 2
+    wr=$(grep -E "^worst render" "$OUT/me_burst.txt" | awk '{print $3}')
+    u=$(grep -E "^underruns" "$OUT/me_burst.txt" | awk '{print $NF}')
+    if [ "$wr" -gt 2666 ] 2>/dev/null && [ "$u" = "0" ]; then
+        echo "ok   a block that overran its period (${wr} us > 2666 us) was"
+        echo "     absorbed by the ring with no dropout -- DESIGN 2.4 measured"
+    else
+        echo "note worst render ${wr} us, underruns $u (the overrun case did not"
+        echo "     arise on this run; not a failure)"
+    fi
+fi
+
 echo
 [ $fail -eq 0 ] && echo "all tests passed" || echo "FAILURES"
 exit $fail

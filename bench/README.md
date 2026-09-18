@@ -12,16 +12,30 @@ This directory holds the harness that answers it. It does not hold the answer.
 |---|---|
 | `mt32emu` static library, host x86-64 | **builds** |
 | `mt32emu` static library, armv7-a Cortex-A7 NEON hard-float | **builds** |
-| `rtf` harness, host | **builds and links** |
-| `rtf` harness, armv7-a | **builds and links** |
+| `rtf` harness (needs ROMs), host and armv7-a | **builds and links**, and has still **never been run**, because there are no ROMs here |
+| `rtf-synth` harness (ROM-free, **fabricated** ROMs) | **builds and runs**, host and armv7-a-under-qemu. Every number in `ANALYSIS.md` § 8 comes from it |
 | SMF parser | **tested** against a synthetic multi-track file (running status, sysex, tempo map) |
 | Static footprint | **measured** — see below |
-| **Real-time factor** | **NOT MEASURED.** No ROMs in this environment, and no ARM hardware or emulator. |
+| armv7-a instructions per output frame vs. sounding partials | **MEASURED, exactly** — `ANALYSIS.md` § 8.4. Deterministic, verified against a hand-counted loop |
+| Where those instructions go, by symbol | **MEASURED, exactly** — `ANALYSIS.md` § 8.6 |
+| Cortex-A7 cycles per instruction on this code | **NOT MEASURED, and not measurable here.** QEMU's TCG has no pipeline model, no branch predictor and no cache |
+| Cache behaviour against real DDR3 | **NOT MEASURED, and the synthetic workload is unrealistically kind to it** — `ANALYSIS.md` § 9.2 |
+| **Real-time factor, on the gate's terms** | **STILL NOT MEASURED.** § 8.5 projects it as a function of an assumed IPC; § 9 is the section that says why that is not an answer |
 
-There is no RTF number anywhere in this repository, and there must not be one
-until somebody runs the harness on a real T113 (or at minimum on a real
-Cortex-A7). A host x86-64 run would produce a number, and that number would be
-meaningless for the gate.
+There is still no measured RTF anywhere in this repository, and there must not
+be one until somebody runs `rtf` on a real T113 (or at minimum a real
+Cortex-A7) with real ROMs. What `ANALYSIS.md` § 8 adds is narrower and worth
+having: an **exact** armv7-a instruction count for a workload with a **chosen
+and verified** partial count, which turns the open question from "we have no
+idea" into "we know the instruction count; we do not know the IPC". § 9 is
+titled so that nobody quotes § 8 without reading it.
+
+One command regenerates all of it:
+
+```
+./bench/estimate.sh            # ~35 min, most of it qemu
+./bench/estimate.sh --quick    # ~10 min, fewer sweep points
+```
 
 ## Vendored upstream
 
@@ -80,13 +94,21 @@ Tag_Advanced_SIMD_arch:  NEONv1 with Fused-MAC
 Tag_ABI_VFP_args:        VFP registers          (i.e. hard float)
 ```
 
-The toolchain file defaults to Thumb-2 (`-mthumb`) and `-O2`. Both are
-deliberate and both are worth re-measuring on the board: `-marm` and `-O3`
-are one `CROSS_PREFIX`-style edit away in
-`bench/cmake/toolchain-armv7a-neon.cmake`.
+The toolchain file defaults to Thumb-2 (`-mthumb`), `-O2` and NEON-VFPv4, and
+each is a `-D` away from being changed, so that the claims in `ANALYSIS.md`
+can be re-measured rather than asserted:
 
-The cross binary has **not been executed** — there is no ARM hardware and no
-`qemu-arm` in this environment. It is a build artefact only.
+```
+-DT113_FPU=vfpv3-d16   # no NEON at all -- the ablation in ANALYSIS.md 8.9
+-DT113_ISA=-marm       # ARM instead of Thumb-2
+-DT113_OPT=-O3         # -O3 instead of -O2
+```
+
+The cross binary **does** run here, under `qemu-arm` (user mode). Its wall
+clock under QEMU is meaningless — TCG models neither the A7 pipeline nor its
+caches — but its **instruction count** is exact, and that is what
+`bench/estimate.sh` uses. See `ANALYSIS.md` § 8.3 for the method and its
+validation, and § 9 for what it does not prove.
 
 ### mt32emu configure flags that worked
 
@@ -130,6 +152,32 @@ message; it never falls back to a default and never prints a number.
 ./bench/build-host/rtf --list-roms       # every dump this build recognises
 ./bench/build-host/rtf --list-machines   # machine configurations
 ```
+
+### `rtf-synth`: running without ROMs at all
+
+`rtf-synth` fabricates ROMs (mt32emu's own test technique) and writes its own
+timbres into the Timbre Temp Area over sysex, so the number of sounding
+partials is chosen by you and verified from `Synth::getPartialStates()`. **The
+audio it produces is not MT-32 audio and every line it prints says so.** It
+exists to measure cost per partial, which is the part of the gate that does not
+need Roland's copyright.
+
+```
+./bench/build-host/rtf-synth --partials 32 --seconds 2 --warmup 0.25
+./bench/build-host/rtf-synth --help
+```
+
+The interesting flags: `--partials N` (0..32, held notes), `--waveform
+square|saw`, `--structure 0..12` (0 = two independent synth partials, 1 = ring
+modulated, 2 = one PCM partial per pair), `--retrigger MS`, plus the same
+`--renderer`, `--reverb`, `--analog`, `--sample-rate` and `--block` as `rtf`.
+`--count-mode` drops the per-block `clock_gettime` and partial polling, for
+instruction counting under `qemu-arm`.
+
+**On a real Cortex-A7 this is the single most valuable thing to run on day
+one**, before any ROM is dumped: the same sweep on silicon, divided by the
+instruction counts in `ANALYSIS.md` § 8.4, gives the measured IPC, which is the
+one number the projection is missing.
 
 ### Host run (sanity only — NOT the gate)
 
@@ -291,7 +339,8 @@ you do not want in a render thread, so probably keep it preallocated.
 
 ## Harness options
 
-Run `rtf --help`. The ones that matter:
+Run `rtf --help` (or `rtf-synth --help`; the synth-configuration flags are the
+same on both). The ones that matter:
 
 | Flag | Default | Why |
 |---|---|---|
@@ -309,10 +358,13 @@ Run `rtf --help`. The ones that matter:
 
 | Path | What |
 |---|---|
-| `rtf.cpp` | the harness: SMF parser, ROM discovery, timed render loop |
-| `CMakeLists.txt` | builds mt32emu static + `rtf`; `footprint` target |
+| `rtf.cpp` | the harness: SMF parser, ROM discovery, timed render loop. **Needs ROMs** |
+| `rtf_synth.cpp` | the ROM-free cost harness: fabricated ROMs, chosen and verified partial count |
+| `estimate.sh` | one command that regenerates every number in `ANALYSIS.md` §§ 8-9 |
+| `results/` | its output (gitignored) |
+| `CMakeLists.txt` | builds mt32emu static + `rtf` + `rtf-synth`; `footprint` target |
 | `cmake/toolchain-armv7a-neon.cmake` | Cortex-A7 / NEON-VFPv4 / hard float |
-| `ANALYSIS.md` | what dominates cost per sample, and whether NEON or the second core can help |
+| `ANALYSIS.md` | §§ 1-7: what dominates cost per sample, from the source. §§ 8-9: the measured cost model and, loudly, what it is not |
 | `vendor/munt/` | the clone (gitignored) |
 
 The SMF parser is written from scratch in `rtf.cpp` (no copyright asserted) so

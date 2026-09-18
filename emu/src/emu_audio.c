@@ -144,6 +144,16 @@ static uint32_t g_target_queued;   /* what the render loop aims to hold     */
 static uint32_t g_stall_at = 0xFFFFFFFFu;
 static uint32_t g_stall_us;
 static int      g_stalled;
+static volatile int      g_in_stall;
+static volatile uint32_t g_stall_underruns;   /* dry periods DURING the stall */
+static uint32_t g_stall_queued_at_start;      /* ring occupancy going in      */
+
+/* Underruns during the injected stall are the experiment; underruns outside it
+ * are this container. Separating them is what makes the stall case an
+ * assertion rather than an observation -- see FINDINGS.md. */
+uint32_t emu_audio_stall_underruns(void) { return g_stall_underruns; }
+uint32_t emu_audio_stall_queued(void)    { return g_stall_queued_at_start; }
+uint32_t emu_audio_stall_us(void)        { return g_stalled ? g_stall_us : 0u; }
 
 void emu_audio_set_stall(uint32_t at_block, uint32_t us)
 {
@@ -161,6 +171,7 @@ uint32_t emu_audio_period_us(void)    { return g_period_us; }
 static void underrun_bookkeeping(int dry)
 {
     if (dry) {
+        if (g_in_stall) g_stall_underruns++;
         if (g_ur_run == 0u) g_ur_bursts++;
         g_ur_run++;
         if (g_ur_run > g_ur_worst_run) g_ur_worst_run = g_ur_run;
@@ -394,10 +405,14 @@ int16_t *mtp_audio_acquire(void)
          * enabled, so the sink keeps consuming and keeps counting, exactly as
          * an I2S DMA engine would while the CPU was stuck in a long render. */
         g_stalled = 1;
+        g_stall_queued_at_start = g_committed - g_played;
         MTP_LOGW("stall: holding the producer for %u us before block %u "
-                 "(%u block periods)", g_stall_us, g_stall_at,
-                 g_stall_us / (g_period_us ? g_period_us : 1u));
+                 "(%u block periods, ring holds %u)", g_stall_us, g_stall_at,
+                 g_stall_us / (g_period_us ? g_period_us : 1u),
+                 g_stall_queued_at_start);
+        g_in_stall = 1;
         mtp_time_delay_us(g_stall_us);
+        g_in_stall = 0;
     }
     return g_ring + (g_committed % g_cfg.block_count) * g_block_samples;
 }

@@ -3,11 +3,29 @@
 Read of Munt `6e7c01fba7e1d50c8fa705834889fd0eac136075` (mt32emu 2.8.3).
 All line numbers are into `bench/vendor/munt/mt32emu/src/`.
 
-**Nothing here is a timing measurement.** No MT-32 ROMs exist in this
-environment and no ARM silicon or emulator was available, so the harness has
-never been run. This is a source read plus disassembly of the armv7-a build.
-Where I make a numeric claim it is either a size from `size(1)`/`sizeof`, an
-instruction count from `objdump`, or arithmetic — never a timing.
+**Sections 1 to 7 contain no measurement of a running program.** They are a
+source read plus static disassembly of the armv7-a build, written when nothing
+in `bench/` had ever been executed. Every numeric claim in them is a size from
+`size(1)`/`sizeof`, a static instruction census from `objdump`, or arithmetic.
+
+**Sections 8 and 9 were added afterwards and they do measure the code running**:
+exact armv7-a *dynamic* instruction counts under `qemu-arm`, an exact
+symbol-level profile of the render path, an exact host x86-64 instruction count
+from `callgrind`, and host wall clock. All of it on **fabricated ROMs**, because
+there are none of Roland's here and never will be. One command regenerates every
+one of those numbers:
+
+```
+./bench/estimate.sh
+```
+
+**There is still no real-time factor in this file, and § 9 exists to stop
+anyone reading § 8 as though there were.**
+
+Two claims made in §§ 3 and 4 from the source read have now been put to the
+test. § 4's survived intact and is now a measurement rather than an inference;
+§ 3's was right in direction and overstated in magnitude. Both are marked in
+place.
 
 ## 1. The shape of the render call
 

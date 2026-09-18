@@ -111,8 +111,14 @@ static void probe_close(mtp_engine *e) { (void)e; }
 static uint32_t probe_timebase(mtp_engine *e) { (void)e; return PROBE_RATE; }
 static uint32_t probe_rendered(mtp_engine *e) { return e->rendered; }
 
-/* The bounded-queue model: one event leaves per render() call, which is the
- * worst case for a synth that applies its queue at block granularity. */
+/* The bounded-queue model. mt32emu drains every event whose timestamp falls
+ * inside the block it is rendering (Synth.cpp:1047, the `peekMidiEvent` loop
+ * in doRender), so the queue empties once per render() call and the real
+ * limit is "events arriving between two render() calls", not "events per
+ * second". probe_render() therefore empties it. mt32emu's own default depth is
+ * 1024 (globals.h:117, DEFAULT_MIDI_EVENT_QUEUE_SIZE); port/host/engine_fake.c
+ * uses 64. --engine-queue lets either be modelled, or something much smaller,
+ * so the render loop's back-pressure path is actually taken. */
 static int queue_take(void)
 {
     if (g_queue_cap == 0u) return 1;
@@ -169,7 +175,7 @@ static void probe_render(mtp_engine *e, int16_t *stereo, uint32_t frames)
         e->rendered += (uint32_t)(t / e->out_rate);
         g_inst.frac  = (uint32_t)(t % e->out_rate);
     }
-    if (g_queue_used) g_queue_used--;
+    g_queue_used = 0u;              /* the block applied everything due */
 }
 
 static void probe_display(mtp_engine *e, char *dst21)

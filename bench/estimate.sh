@@ -3,7 +3,7 @@
 # bench/estimate.sh -- regenerate every number in bench/ANALYSIS.md sections 8
 # and 9, from a clean tree, in one command.
 #
-#   ./bench/estimate.sh            full run   (~20-30 min, most of it qemu)
+#   ./bench/estimate.sh            full run   (~35 min, most of it qemu)
 #   ./bench/estimate.sh --quick    short run  (~4 min, fewer sweep points)
 #
 # WHAT THIS PRODUCES, AND WHAT IT DOES NOT.
@@ -143,12 +143,32 @@ arm_cost() {
 }
 
 # host_rtf <label> <args...>
+#
+# HOST_REPS runs, and we keep the one with the lowest CPU time. This container
+# is shared and its wall clock is contended: back-to-back runs of an identical
+# workload have been observed to differ by more than 3x. The minimum is the
+# least-interfered-with sample, and it is the only host statistic worth
+# quoting. The spread is reported too, so the reader can see how bad it was.
+HOST_REPS=5
 host_rtf() {
   local label="$1"; shift
-  local line
-  line="$("$B_HOST/rtf-synth" --block "$BLOCK" "$@" | grep '^SYNTHRESULT')"
-  printf '%s\t%s\n' "$label" "$line" >> "$OUT/host-rtf.tsv"
-  say "  $(printf '%-26s %s' "$label" "$(echo "$line" | sed 's/SYNTHRESULT //')")"
+  local i line best best_cpu cpu worst_cpu
+  best=""; best_cpu=""; worst_cpu=""
+  for i in $(seq 1 $HOST_REPS); do
+    line="$("$B_HOST/rtf-synth" --block "$BLOCK" "$@" | grep '^SYNTHRESULT')"
+    cpu="$(printf '%s' "$line" | sed -n 's/.* cpu_s=\([0-9.]*\) .*/\1/p')"
+    if [ -z "$best_cpu" ] || [ "$(python3 -c "print(1 if $cpu < $best_cpu else 0)")" = 1 ]; then
+      best_cpu="$cpu"; best="$line"
+    fi
+    if [ -z "$worst_cpu" ] || [ "$(python3 -c "print(1 if $cpu > $worst_cpu else 0)")" = 1 ]; then
+      worst_cpu="$cpu"
+    fi
+  done
+  printf '%s\t%s\tspread=%s\n' "$label" "$best" \
+      "$(python3 -c "print('%.2f' % ($worst_cpu/float($best_cpu)))")" >> "$OUT/host-rtf.tsv"
+  say "  $(printf '%-26s %s  [best of %d, worst/best=%sx]' "$label" \
+      "$(echo "$best" | sed 's/SYNTHRESULT //')" "$HOST_REPS" \
+      "$(python3 -c "print('%.2f' % ($worst_cpu/float($best_cpu)))")")"
 }
 
 # ------------------------------------------------------------- host sweep ---
@@ -161,12 +181,13 @@ done
 if [ "$QUICK" = 0 ]; then
   host_rtf "host-p32-reverb-off"  --partials 32 --seconds 2.0 --warmup 0.25 --reverb off
   host_rtf "host-p32-float"       --partials 32 --seconds 2.0 --warmup 0.25 --renderer float
+  host_rtf "host-p32-float-pcm"   --partials 32 --seconds 2.0 --warmup 0.25 --renderer float --structure 2
   host_rtf "host-p32-saw"         --partials 32 --seconds 2.0 --warmup 0.25 --waveform saw
   host_rtf "host-p32-struct1"     --partials 32 --seconds 2.0 --warmup 0.25 --structure 1
   host_rtf "host-p32-struct2-pcm" --partials 32 --seconds 2.0 --warmup 0.25 --structure 2
   host_rtf "host-p32-48k"         --partials 32 --seconds 2.0 --warmup 0.25 --sample-rate 48000
   host_rtf "host-p32-analog-dig"  --partials 32 --seconds 2.0 --warmup 0.25 --analog digital
-  host_rtf "host-p32-retrig8ms"   --partials 32 --seconds 2.0 --warmup 0.25 --retrigger 8
+  host_rtf "host-p32-retrig2ms"   --partials 32 --seconds 2.0 --warmup 0.25 --retrigger 2
 fi
 say ""
 
@@ -188,13 +209,28 @@ if [ "$QUICK" = 0 ]; then
   arm_cost "arm-p32-48k"          "$S_HI"  --partials 32 --sample-rate 48000
   arm_cost "arm-p32-block64"      "$S_HI"  --partials 32 --block 64
   arm_cost "arm-p32-block512"     "$S_HI"  --partials 32 --block 512
-  # 8 ms is a deliberately absurd re-strike rate (1000 note-ons/s across 8
-  # parts, where a busy score is tens per second). It is an upper bound on
-  # what note churn costs, not an estimate of it.
-  arm_cost "arm-p32-retrig8ms"    "$S_HI"  --partials 32 --retrigger 8
+  # 2 ms is a deliberately absurd re-strike rate: every 64 frames, all 8 parts
+  # get an All Sound Off and a fresh note-on, i.e. 4000 note-ons per second
+  # where a busy score is tens. It is an upper bound on what note churn costs,
+  # not an estimate of it. 512 frames / 64 = 7 re-strikes inside the window.
+  arm_cost "arm-p32-retrig2ms"    "$S_HI"  --partials 32 --retrigger 2
   # The float renderer is expensive enough that it needs a shorter window.
   arm_cost "arm-p8-int"           0.004    --partials 8
   arm_cost "arm-p8-float"         0.004    --partials 8 --renderer float
+  # structure 2 puts a PCM partial in each pair, which is the only way to reach
+  # LA32FloatWaveGenerator's fmod() and its second cos() (ANALYSIS.md 3).
+  arm_cost "arm-p8-int-pcm"       0.004    --partials 8 --structure 2
+  arm_cost "arm-p8-float-pcm"     0.004    --partials 8 --structure 2 --renderer float
+fi
+
+if [ "$QUICK" = 0 ]; then
+  RS_BASE="$(grep -P '^arm-p32\t' "$OUT/arm-insn.tsv" | head -1 | cut -f7)"
+  RS_BASE0="$(grep -P '^arm-p32\t' "$OUT/arm-insn.tsv" | head -1 | cut -f6)"
+  RS_RT="$(grep -P '^arm-p32-retrig2ms\t' "$OUT/arm-insn.tsv" | head -1 | cut -f7)"
+  RS_RT0="$(grep -P '^arm-p32-retrig2ms\t' "$OUT/arm-insn.tsv" | head -1 | cut -f6)"
+  say "  cost of one full re-strike (8 All Sound Off + 8 note-ons = 32 partials"
+  say "  torn down and reallocated), from 7 re-strikes in 512 frames:"
+  say "    $(python3 -c "print('%.0f instructions' % ((($RS_RT-$RS_RT0)-($RS_BASE-$RS_BASE0))/7.0))")"
 fi
 
 # NEON ablation: the same source, same -O2, same -mcpu, NEON simply not
@@ -205,6 +241,91 @@ if [ "$QUICK" = 0 ]; then
   arm_cost "arm-p1-NO-NEON" "$S_HI" --partials 1
 fi
 BIN="$B_ARM/rtf-synth"
+say ""
+
+# ------------------------------------ an IPC reference point, on the host ----
+#
+# The one thing this container cannot supply is cycles per instruction on a
+# Cortex-A7. It can supply cycles per instruction on THIS code on the host,
+# which is a useful reference in one direction only: the host is a wide
+# out-of-order x86-64 with megabytes of cache, and the A7 is an in-order,
+# partial-dual-issue core with 32 KiB of L1 behind DDR3. Whatever IPC the host
+# reaches here is an upper reference, not a prediction.
+#
+# valgrind/callgrind counts host instructions exactly, the same way qemu counts
+# guest ones, and the same 0-frames-versus-512-frames differencing applies.
+
+if command -v valgrind >/dev/null 2>&1; then
+  say "--- host x86-64: exact instruction count, and the IPC it implies ---"
+  vg_insns() {
+    valgrind --tool=callgrind --callgrind-out-file=/dev/null \
+      "$B_HOST/rtf-synth" --count-mode --block "$BLOCK" "$@" 2>&1 \
+      | sed -n 's/.*I *refs: *\([0-9,]*\)/\1/p' | tr -d ','
+  }
+  VG_LO="$(vg_insns --partials 32 --seconds "$S_LO")"
+  VG_HI="$(vg_insns --partials 32 --seconds "$S_HI")"
+  HOST_NS32="$(grep -P '^host-p32\t' "$OUT/host-rtf.tsv" | head -1 \
+               | sed -n 's/.*ns_per_frame=\([0-9.]*\).*/\1/p')"
+  HOST_GHZ="$(grep -m1 'model name' /proc/cpuinfo | sed -n 's/.*@ *\([0-9.]*\)GHz.*/\1/p')"
+  [ -n "$HOST_GHZ" ] || HOST_GHZ=0
+  say "  x86-64 insn/frame at 32 partials : $(python3 -c "print('%.1f' % (($VG_HI-$VG_LO)/512.0))")"
+  say "  armv7-a insn/frame at 32 partials: $(grep -P '^arm-p32\t' "$OUT/arm-insn.tsv" | head -1 \
+        | awk -F'\t' '{printf "%.1f", ($7-$6)/512.0}')"
+  if [ -n "$HOST_NS32" ] && [ "$HOST_GHZ" != "0" ]; then
+    say "  host best wall clock             : $HOST_NS32 ns/frame"
+    say "  nominal host clock               : $HOST_GHZ GHz (from /proc/cpuinfo; the"
+    say "                                     real turbo clock is not visible in this"
+    say "                                     container, so this IPC is nominal)"
+    say "  => host IPC on THIS code         : $(python3 -c "print('%.2f' % ((($VG_HI-$VG_LO)/512.0)/($HOST_NS32*$HOST_GHZ)))")"
+  fi
+  say ""
+else
+  say "valgrind not present: skipping the host IPC reference point"
+  say ""
+fi
+
+# ------------------------------------------------------ where the time goes --
+#
+# qemu's exec trace prints the symbol the PC falls in, so the same trace that
+# counts instructions also profiles them, exactly, with no sampling error.
+# Two profiles -- with and without audio -- subtract to the render path alone.
+
+profile_one() {   # profile_one <outfile> <args...>
+  local outfile="$1"; shift
+  { qemu-arm -one-insn-per-tb -d exec -D /dev/fd/3 \
+      "$BIN" --count-mode --block "$BLOCK" "$@" > /dev/null 2>/dev/null; } 3>&1 \
+    | awk -F'] ' '{ s = $2; if (s == "") s = "(no-symbol)"; c[s]++ }
+                  END { for (k in c) printf "%d\t%s\n", c[k], k }' \
+    | sort -rn > "$outfile"
+}
+
+say "--- exact instruction profile of the render path, 32 partials ---"
+profile_one "$OUT/prof-p32-render.tsv" --partials 32 --seconds "$S_HI"
+profile_one "$OUT/prof-p32-setup.tsv"  --partials 32 --seconds 0
+python3 - "$OUT/prof-p32-render.tsv" "$OUT/prof-p32-setup.tsv" 512 <<'PY' | c++filt | tee -a "$RUNLOG"
+import sys
+render, setup, frames = sys.argv[1], sys.argv[2], int(sys.argv[3])
+def load(path):
+    d = {}
+    for line in open(path):
+        n, sym = line.rstrip('\n').split('\t', 1)
+        d[sym] = d.get(sym, 0) + int(n)
+    return d
+r, s = load(render), load(setup)
+delta = {}
+for k in set(list(r) + list(s)):
+    v = r.get(k, 0) - s.get(k, 0)
+    if v > 0: delta[k] = v
+total = sum(delta.values())
+print()
+print("  %d instructions attributable to rendering %d frames (%.1f per frame)"
+      % (total, frames, total / float(frames)))
+print()
+print("  %8s  %6s  %s" % ("insn/fr", "share", "symbol"))
+for k in sorted(delta, key=lambda x: -delta[x])[:20]:
+    print("  %8.1f  %5.1f%%  %s" % (delta[k] / float(frames),
+                                    100.0 * delta[k] / total, k))
+PY
 say ""
 
 # ------------------------------------------------------- static code census --
@@ -306,6 +427,22 @@ if p32:
     print()
     print("  break-even IPC for RTF <= %.2f (the gate) : %.3f" % (TARGET, breakeven_target))
     print("  break-even IPC for RTF <= 1.00 (real time): %.3f" % breakeven_rt)
+    print()
+    print("  HARD FLOOR: the Cortex-A7 is at best partial-dual-issue, so IPC <= 2")
+    print("  is an architectural ceiling no tuning can beat. RTF >= %.3f at 32"
+          % rtf(p32['ipf'], p32['rate'], 2.0))
+    print("  partials, whatever else is true.")
+
+    if len(sweep) >= 2:
+        print()
+        print("INVERTED: how many sounding partials fit inside RTF %.2f, per assumed IPC" % TARGET)
+        print("  from the fit insn/frame = %.1f + %.1f * partials" % (a, b))
+        print()
+        print("  assumed IPC   partials that fit")
+        for ipc in (1.2, 1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4):
+            budget = TARGET * CLK * ipc / p32['rate']    # instructions per frame
+            n = (budget - a) / b
+            print("  %11.2f   %s" % (ipc, ("%.1f" % n) if n > 0 else "none"))
 
 print()
 print("variants, armv7-a instructions per output frame")
@@ -321,12 +458,20 @@ for r in rows:
     print("  %-22s %10.1f insn/frame  out_rate=%d%s" % (r['label'], r['ipf'], r['rate'], ratio))
 
 print()
+print("one-time cost: instructions executed before any audio is rendered")
+print("  (process start + ROM fabrication + Synth::open + one probe block)")
+for lbl in ('arm-p32', 'arm-p32-NO-NEON', 'arm-p1', 'arm-p1-NO-NEON'):
+    if lbl in by:
+        print("  %-22s %12d instructions" % (lbl, by[lbl]['fixed']))
+
+print()
 print("host x86-64 wall clock, same harness, same workload (NOT the gate)")
 for line in open(host_path):
     label, rest = line.rstrip('\n').split('\t', 1)
-    d = dict(kv.split('=', 1) for kv in rest.replace('SYNTHRESULT ', '').split())
-    print("  %-22s active=%-3s rtf=%-9s worst_block_rtf=%-9s ns/frame=%s"
-          % (label, d['active'], d['rtf'], d['worst_rtf'], d['ns_per_frame']))
+    d = dict(kv.split('=', 1) for kv in rest.replace('SYNTHRESULT ', '').replace('\t', ' ').split())
+    print("  %-22s active=%-3s rtf=%-9s worst_block_rtf=%-9s ns/frame=%-10s worst/best=%s"
+          % (label, d['active'], d['rtf'], d['worst_rtf'], d['ns_per_frame'],
+             d.get('spread', '?')))
 
 with open(out_path, 'w') as fh:
     fh.write("see run.log; regenerate with bench/estimate.sh\n")

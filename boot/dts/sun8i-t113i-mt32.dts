@@ -1,0 +1,138 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * mt32-t113: Allwinner T113-i with EXTERNAL DDR3, bare-metal MT-32 synth.
+ *
+ * NOT VALIDATED ON HARDWARE.  This exists so that
+ * boot/configs/t113i_mt32_defconfig actually builds; every pin choice below
+ * is a proposal to workstream B, not a reading of a schematic.
+ *
+ * Validated against u-boot commit 211de43d0f954a00a490220c1aac9db298287c40
+ * (v2026.10-rc4-34): it compiles to a DTB and the resulting
+ * u-boot-sunxi-with-spl.bin links.  See ../BRINGUP.md section 2.9.
+ *
+ * Two pin choices are load-bearing and are explained in BRINGUP.md section 6.2:
+ *
+ *   - Console on UART0 PE2/PE3.  Mainline's sunxi SPL does its console pinmux
+ *     in C, not from this devicetree: arch/arm/mach-sunxi/board.c:160 muxes
+ *     PE2 and PE3 to function 6 when CONFIG_CONS_INDEX == 1 on
+ *     MACH_SUN8I_R528.  PB8/PB9 (what the 100ask T113-i devkit uses) would
+ *     work for U-Boot proper but the SPL would print nothing.  PE2/PE3 is the
+ *     only UART0 pin pair that needs no patch.
+ *   - MIDI in on UART1 PG6/PG7 (uart1_pg6_pins), the only UART1 pin group in
+ *     the upstream dtsi.  U-Boot never touches it; it is here so the payload
+ *     and any later Linux have one description to agree with.
+ */
+
+/dts-v1/;
+
+#include "sun8i-t113s.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	model = "mt32-t113 (Allwinner T113-i, external DDR3)";
+	/*
+	 * The T113-i is the same die as the T113-S3 (sun8iw20); mainline has
+	 * no separate compatible for it, and MACH_SUN8I_R528 covers both.
+	 */
+	compatible = "mt32,t113i-mt32", "allwinner,sun8i-t113s";
+
+	aliases {
+		serial0 = &uart0;	/* console */
+		serial1 = &uart1;	/* MIDI in, 31250 baud */
+		mmc0 = &mmc0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	/*
+	 * One x16 DDR3 part.  The size here is documentation only: the SPL's
+	 * DRAM driver auto-detects rank, DQ width, row/bank/page and reports
+	 * the real size (drivers/ram/sunxi/dram_sun20i_d1.c,
+	 * auto_scan_dram_config() / DRAMC_get_dram_size()), and U-Boot uses
+	 * that, not this node.
+	 */
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x40000000 0x20000000>;	/* 512 MiB */
+	};
+
+	reg_vcc3v3: regulator-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc-3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+
+	/* VDD-CPU / VDD-SYS rail.  Value is a placeholder for workstream B. */
+	reg_vcc_core: regulator-core {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc-core";
+		regulator-min-microvolt = <900000>;
+		regulator-max-microvolt = <900000>;
+		vin-supply = <&reg_vcc3v3>;
+		regulator-always-on;
+	};
+};
+
+&cpu0 {
+	cpu-supply = <&reg_vcc_core>;
+};
+
+&cpu1 {
+	cpu-supply = <&reg_vcc_core>;
+};
+
+&dcxo {
+	clock-frequency = <24000000>;
+};
+
+&pio {
+	/*
+	 * Not in the upstream dtsi, because no upstream board uses it.  Mux
+	 * value 6 = "uart0" on PB0-PB1, PB8-PB9 and PE2-PE3, per the function
+	 * table in drivers/pinctrl/sunxi/pinctrl-sunxi.c:601-619.
+	 */
+	uart0_pe_pins: uart0-pe-pins {
+		pins = "PE2", "PE3";
+		function = "uart0";
+	};
+};
+
+/* Console. */
+&uart0 {
+	pinctrl-0 = <&uart0_pe_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/* MIDI in at 31250 baud.  Owned by the payload, not by U-Boot. */
+&uart1 {
+	pinctrl-0 = <&uart1_pg6_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/* microSD: ROMs, SoundFonts, config, and the payload itself. */
+&mmc0 {
+	pinctrl-0 = <&mmc0_pins>;
+	pinctrl-names = "default";
+	broken-cd;
+	bus-width = <4>;
+	vmmc-supply = <&reg_vcc3v3>;
+	status = "okay";
+};
+
+/*
+ * I2S1 to the PCM5102A.  PG12 = BCLK/LRCK group, PG15 = DOUT.  U-Boot has no
+ * I2S driver for this SoC; this node exists so the payload's driver and any
+ * later Linux agree on the pins.
+ */
+&i2s1 {
+	pinctrl-0 = <&i2s1_pins>, <&i2s1_dout0_pin>;
+	pinctrl-names = "default";
+	status = "okay";
+};
