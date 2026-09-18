@@ -1,0 +1,32 @@
+# desktop/corpus/MANIFEST.tsv - every file fetch.sh will put in files/, with
+# the provenance that makes it legal to use and the reason it is here.
+#
+# NOTHING IN THIS FILE IS COMMITTED AS AUDIO OR AS MIDI. fetch.sh downloads
+# each row from the pinned commit and checks its sha256 against this table, in
+# the same spirit as bench/README.md pinning Munt: the repository records what
+# it read, not a copy of it.
+#
+# licence is what the SOURCE REPOSITORY states, read out of the file named in
+# licence_file at the pinned commit -- not inferred from a project's reputation.
+# Both licences here require the copyright notice to be kept with the work,
+# which is why `copyright` is a column and not a footnote.
+#
+# columns, tab separated:
+#   name        what ab.sh and scan.py call it
+#   repo        github.com/<repo>
+#   commit      pinned; the fetch URL contains it, so the bytes cannot drift
+#   path        path inside that repo at that commit
+#   bytes       measured here
+#   sha256      measured here; fetch.sh refuses a mismatch
+#   licence     SPDX identifier of the source repository's stated licence
+#   licence_file    the file in that repo that states it
+#   copyright   who holds it, and who wrote the piece
+#   exercises   why this one is in the corpus and not another
+name	repo	commit	path	bytes	sha256	licence	licence_file	copyright	exercises
+map24	freedoom/freedoom	d14dbbee3b6fbfb2c11cdb65eb61216e86d4ee85	musics/d_map24.mid	83087	f044e42f53c3f3037dd3d8fa5b66ef8fa1fcc90758297ae8737d18cb6cbe9e59	BSD-3-Clause	COPYING.adoc	(c) 2001-2024 Contributors to the Freedoom project; "Space's Despair" by Korp, remix of "Balancing Act" by Andrew Bassett (CREDITS-MUSIC)	the densest peak in 143 files scanned: 29 notes sounding at once on the channels an MT-32 listens to, p99 27, over 235 s
+map18	freedoom/freedoom	d14dbbee3b6fbfb2c11cdb65eb61216e86d4ee85	musics/d_map18.mid	65757	b89beb0935a63b51d3904b8ba75b820c458581e3129f93e20754204eae35d698	BSD-3-Clause	COPYING.adoc	(c) 2001-2024 Contributors to the Freedoom project; "Realistic Approach" by Kevin "Velvetic" Martins (CREDITS-MUSIC)	the longest: 521 s. Ring occupancy, underrun behaviour and drift over nearly nine minutes rather than four seconds
+dm07	freedoom/freedoom	d14dbbee3b6fbfb2c11cdb65eb61216e86d4ee85	musics/d_dm07.mid	78478	0c6010ccc50ce891c38a6a64c4aa7d88ebe405ae2fddd8b99ffed18051f4d4d7	BSD-3-Clause	COPYING.adoc	(c) 2001-2024 Contributors to the Freedoom project; "I Fell Off The Stairs" by Korp (CREDITS-MUSIC)	the fastest event rate: 60.6 note-ons per second sustained for 144 s. This is the parser and the FIFO, not the synthesiser
+inter	freedoom/freedoom	d14dbbee3b6fbfb2c11cdb65eb61216e86d4ee85	musics/d_inter.mid	18900	861878439e320b55f2e06a7905de0b12aec4c17588eebf31d753da6e60514f4b	BSD-3-Clause	COPYING.adoc	(c) 2001-2024 Contributors to the Freedoom project; "YOU LIVE!!!!" by Stratos (CREDITS-MUSIC)	the only sysex in the whole 143-file scan: one 8-byte Universal Real Time master volume, f0 7f 7f 04 01 7f 7f f7. Real, tiny, and an MT-32 ignores it
+e1m1	freedoom/freedoom	d14dbbee3b6fbfb2c11cdb65eb61216e86d4ee85	musics/d_e1m1.mid	42240	d7e43ae0b04d7476acde1cb27bfd918badc1eb88f23604738de16002387b24b5	BSD-3-Clause	COPYING.adoc	(c) 2001-2024 Contributors to the Freedoom project; "Steel and Brass" by J.Astartes and Mr795 (CREDITS-MUSIC)	the light end, deliberately: peak 9, p50 5. A corpus of only worst cases cannot show that the cost line has a slope
+rolling	OpenTTD/OpenMSX	312ca0ae46a271fb65ba49674b5e935ca0f41036	src/keep_on_rolling.mid	53213	10418b9ee95137663c18e37d2a8a856829e650e29b8157f0ca006c7a856973df	GPL-2.0-only	LICENSE	(c) 2010-2021 OpenMSX Authors; "Keep on Rolling" by Trolley Trev (src/themes.list, README.md 6.0)	the only file of 143 whose NOTE count alone reaches 32, the MT-32's partial ceiling, with no multiplier applied. Different idiom from Doom: jazz, not metal
+journey	OpenTTD/OpenMSX	312ca0ae46a271fb65ba49674b5e935ca0f41036	src/tttheme2.mid	46447	0641a227115d374cbeba338d0798840ca61a323c4044ce717d67fa1d2d01cdb4	GPL-2.0-only	LICENSE	(c) 2010-2021 OpenMSX Authors; "OpenTTD journey" by -lucas- (src/themes.list, README.md 6.0)	short and dense: 84 s at 48.3 note-ons/s, peak 24. The default when you want an A/B that finishes while you watch

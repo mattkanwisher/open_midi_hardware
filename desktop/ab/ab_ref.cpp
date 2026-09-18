@@ -31,12 +31,42 @@
  *          [--engine fake|mt32emu|mt32emu-fakerom] [--roms DIR]
  *          [--control-rom P] [--pcm-rom P] [--machine mt32|cm32l]
  *          [--partials N] [--no-reverb]
+ *          [--partial-log FILE] [--partial-every FRAMES]
+ *
+ * COUNTING PARTIALS, and why it is here rather than in a tool of its own.
+ * bench/ANALYSIS.md section 9.1(b) says a repository with no ROMs cannot learn
+ * how many partials a real score sounds, and leaves that term of the cost line
+ * blank. Half of that is right and half is not: what the timbres cost is
+ * unknowable here, but how many partials the ALLOCATOR ends up holding is a
+ * thing the library will tell you, for any stream, as it renders it.
+ * --partial-log samples Synth::getPartialStates() every --partial-every frames
+ * (default 128, the block size port/DESIGN.md 2.2 chooses) and writes one line
+ * per sample, then prints peak, mean and time percentiles.
+ *
+ * Note carefully which overload: getPartialStates(PartialState *) is one entry
+ * per partial. The OTHER one, getPartialStates(Bit8u *), packs four partials
+ * into a byte, and reading it as if it were this one is a mistake that already
+ * cost bench/ a long detour -- ANALYSIS.md section 8.10 records it. This uses
+ * the unpacked overload (Synth.h:601) on purpose.
+ *
+ * Getting at the Synth is a documented reach-through, not an accident: both
+ * wrappers behind mtp_engine.h -- port/host/engine_mt32emu.cpp:56-65 and
+ * emu/src/engine_mt32emu_fake_roms.cpp:119-125 -- declare
+ * `MT32Emu::Synth *synth` as the FIRST member of their `struct mtp_engine`, so
+ * the first pointer in the handle is the synth. Neither struct is visible from
+ * here and redeclaring either would be an ODR violation the moment both are
+ * linked, so this reads the first pointer and says so. It is used for
+ * measurement only; nothing in the A/B legs depends on it.
  *
  * SPDX-License-Identifier: 0BSD
  */
 
 #include "mtp_engine.h"
 #include "mtp_log.h"
+
+#ifdef MTP_WITH_MT32EMU
+#include <mt32emu/mt32emu.h>
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -143,6 +173,123 @@ int write_wav(const char *path, const int16_t *pcm, uint32_t frames, uint32_t ra
     return 0;
 }
 
+/* ---------------------------------------------------------- partial counts */
+
+#ifdef MTP_WITH_MT32EMU
+
+/* The first pointer in an mtp_engine handle is the Synth. See the header
+ * comment: both mt32emu wrappers put it first, and neither struct can be
+ * declared here without an ODR violation. */
+MT32Emu::Synth *synth_of(mtp_engine *e)
+{
+    return *reinterpret_cast<MT32Emu::Synth **>(e);
+}
+
+struct PartialSampler {
+    FILE                  *log;
+    uint32_t               every;       /* frames between samples */
+    uint32_t               cap;         /* synth->getPartialCount()          */
+    MT32Emu::PartialState *states;
+    uint32_t              *hist;        /* hist[n] = samples with n active   */
+    uint32_t               samples;
+    uint32_t               peak;
+    uint64_t               total;       /* sum of active counts, for a mean  */
+
+    PartialSampler() : log(NULL), every(0u), cap(0u), states(NULL),
+                       hist(NULL), samples(0u), peak(0u), total(0u) {}
+};
+
+int sampler_start(PartialSampler *s, mtp_engine *inst, const char *path,
+                  uint32_t every, uint32_t rate)
+{
+    MT32Emu::Synth *syn = synth_of(inst);
+    s->cap = syn->getPartialCount();
+    if (s->cap == 0u || s->cap > 4096u) {
+        fprintf(stderr, "ab_ref: getPartialCount() returned %u -- this engine "
+                        "is not mt32emu, refusing to count partials\n",
+                (unsigned)s->cap);
+        return -1;
+    }
+    s->states = new MT32Emu::PartialState[s->cap];
+    s->hist   = (uint32_t *)calloc((size_t)s->cap + 1u, sizeof(uint32_t));
+    s->every  = every ? every : 128u;
+    if (!s->hist) return -1;
+    if (path) {
+        s->log = fopen(path, "w");
+        if (!s->log) {
+            fprintf(stderr, "ab_ref: cannot write %s\n", path);
+            return -1;
+        }
+        fprintf(s->log, "# ab_ref partial log\n");
+        fprintf(s->log, "# one sample every %u frames at %u Hz; "
+                        "%u partials available\n",
+                (unsigned)s->every, (unsigned)rate, (unsigned)s->cap);
+        fprintf(s->log, "# frame\tseconds\tactive\tnonreleasing\n");
+    }
+    return 0;
+}
+
+void sampler_take(PartialSampler *s, mtp_engine *inst, uint32_t at,
+                  uint32_t rate)
+{
+    MT32Emu::Synth *syn = synth_of(inst);
+    uint32_t active = 0u, holding = 0u;
+    syn->getPartialStates(s->states);
+    for (uint32_t i = 0u; i < s->cap; i++) {
+        if (s->states[i] == MT32Emu::PartialState_INACTIVE) continue;
+        active++;
+        if (s->states[i] != MT32Emu::PartialState_RELEASE) holding++;
+    }
+    s->hist[active]++;
+    s->samples++;
+    s->total += active;
+    if (active > s->peak) s->peak = active;
+    if (s->log)
+        fprintf(s->log, "%u\t%.4f\t%u\t%u\n", (unsigned)at,
+                (double)at / (double)rate, (unsigned)active,
+                (unsigned)holding);
+}
+
+/* The count that p per cent of the SAMPLES are at or below. Samples are taken
+ * at a fixed frame interval, so this is time-weighted by construction -- a
+ * one-block spike counts once, a chord held for a second counts for every
+ * block it spans. */
+uint32_t sampler_pct(const PartialSampler *s, int p)
+{
+    uint64_t want = ((uint64_t)s->samples * (uint64_t)p + 99u) / 100u;
+    uint64_t acc = 0u;
+    for (uint32_t n = 0u; n <= s->cap; n++) {
+        acc += s->hist[n];
+        if (acc >= want) return n;
+    }
+    return s->cap;
+}
+
+void sampler_report(const PartialSampler *s, const char *path)
+{
+    if (!s->samples) return;
+    double mean = (double)s->total / (double)s->samples;
+    printf("partials sampled        %u times, every %u frames\n",
+           (unsigned)s->samples, (unsigned)s->every);
+    printf("partials peak           %u of %u available\n",
+           (unsigned)s->peak, (unsigned)s->cap);
+    printf("partials mean           %.2f\n", mean);
+    printf("partials p50 p90 p99    %u %u %u\n",
+           (unsigned)sampler_pct(s, 50), (unsigned)sampler_pct(s, 90),
+           (unsigned)sampler_pct(s, 99));
+    printf("partials at the ceiling %u of %u samples (%.2f%%)\n",
+           (unsigned)s->hist[s->cap], (unsigned)s->samples,
+           100.0 * (double)s->hist[s->cap] / (double)s->samples);
+    /* bench/ANALYSIS.md 8.4's cost line, evaluated where this run actually
+     * sat. It is an instruction count, not a time: section 9 says why. */
+    printf("armv7-a instr/frame     %.0f at the peak, %.0f at the mean "
+           "(489.9 + 511.5 x partials, bench/ANALYSIS.md 8.4)\n",
+           489.9 + 511.5 * (double)s->peak, 489.9 + 511.5 * mean);
+    if (path) printf("partial log             %s\n", path);
+}
+
+#endif /* MTP_WITH_MT32EMU */
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -150,7 +297,9 @@ int main(int argc, char **argv)
     const char *events = NULL, *wav = NULL, *roms = NULL;
     const char *ctrl = NULL, *pcm_rom = NULL, *machine = "mt32";
     const char *engname = "auto";
-    uint32_t rate = 48000u, frames = 0u, partials = 32u;
+    const char *plog = NULL;
+    uint32_t rate = 48000u, frames = 0u, partials = 32u, pevery = 128u;
+    int want_partial_counts = 0;
     int reverb = 1;
     char ctrl_buf[1024], pcm_buf[1024];
 
@@ -166,6 +315,13 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc)  frames = (uint32_t)strtoul(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--partials") && i + 1 < argc) partials = (uint32_t)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-reverb"))               reverb = 0;
+        else if (!strcmp(argv[i], "--partial-log") && i + 1 < argc) {
+            plog = argv[++i]; want_partial_counts = 1;
+        }
+        else if (!strcmp(argv[i], "--partial-every") && i + 1 < argc) {
+            pevery = (uint32_t)strtoul(argv[++i], NULL, 10);
+            want_partial_counts = 1;
+        }
         else { fprintf(stderr, "ab_ref: unknown option %s\n", argv[i]); return 2; }
     }
     if (!events || !wav) {
@@ -231,6 +387,26 @@ int main(int argc, char **argv)
     int16_t *pcm = (int16_t *)calloc((size_t)frames * 2u, sizeof(int16_t));
     if (!pcm) { fprintf(stderr, "ab_ref: out of memory\n"); return 1; }
 
+#ifdef MTP_WITH_MT32EMU
+    PartialSampler ps;
+    int sampling = 0;
+    if (want_partial_counts) {
+        if (eng == &mtp_engine_fake) {
+            fprintf(stderr, "ab_ref: --partial-log needs an mt32emu engine; "
+                            "the fake engine has no partials\n");
+            return 2;
+        }
+        if (sampler_start(&ps, inst, plog, pevery, rate) != 0) return 1;
+        sampling = 1;
+    }
+#else
+    if (want_partial_counts) {
+        fprintf(stderr, "ab_ref: this build has no mt32emu, so it has no "
+                        "partials to count\n");
+        return 2;
+    }
+#endif
+
     uint32_t at = 0u, next = 0u, backpressure = 0u, shorts = 0u, sysexes = 0u;
     while (at < frames) {
         /* How far may we render before the next event is due? */
@@ -246,10 +422,22 @@ int main(int argc, char **argv)
              * to the real loop's without letting block size change the
              * result -- it cannot, since no event lands inside a chunk. */
             while (n) {
-                uint32_t chunk = n > 4096u ? 4096u : n;
+                uint32_t limit = 4096u;
+#ifdef MTP_WITH_MT32EMU
+                /* With sampling on, the chunk is the sampling interval, so
+                 * that a count is taken on a fixed frame grid. It changes the
+                 * chunking and therefore MUST NOT be on for an A/B leg: an
+                 * event still cannot land inside a chunk, so the audio is the
+                 * same, but there is no reason to make ab.sh prove that. */
+                if (sampling && ps.every < limit) limit = ps.every;
+#endif
+                uint32_t chunk = n > limit ? limit : n;
                 eng->render(inst, pcm + (size_t)at * 2u, chunk);
                 at += chunk;
                 n -= chunk;
+#ifdef MTP_WITH_MT32EMU
+                if (sampling) sampler_take(&ps, inst, at, rate);
+#endif
             }
             continue;
         }
@@ -303,6 +491,9 @@ int main(int argc, char **argv)
     if (next < g_ev_len)
         printf("NOTE: %u event(s) fell past the end of the render window\n",
                (unsigned)(g_ev_len - next));
+#ifdef MTP_WITH_MT32EMU
+    if (sampling) sampler_report(&ps, plog);
+#endif
 
     eng->close(inst);
     free(pcm);

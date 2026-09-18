@@ -5,6 +5,8 @@
 #   ./desktop/ab.sh                          # the `voice` vector, no ROMs
 #   ./desktop/ab.sh capture.mid --roms ~/mt32roms
 #   ./desktop/ab.sh capture.syx --roms ~/mt32roms --out /tmp/ab
+#   ./desktop/ab.sh --corpus map24           # a file from desktop/corpus
+#   ./desktop/ab.sh --corpus map24 --count-partials
 #
 # WHAT THIS IS FOR. The question behind it is "how do we sound against another
 # MT-32 implementation?", and the way to ask it that survives being repeated is
@@ -54,6 +56,9 @@ ROMS=${ROMS:-}
 OUT=
 MACHINE=mt32
 ENGINE=
+CORPUS=
+COUNT_PARTIALS=0
+PARTIAL_EVERY=${PARTIAL_EVERY:-128}
 RATE=${RATE:-48000}
 # Seconds rendered after the last event. 2, not a rounder number, because the
 # `ours` leg stops two seconds after its MIDI source runs out whatever
@@ -75,6 +80,13 @@ options:
   --out DIR         where the WAVs go (default: desktop/build/ab/out)
   --tail S          seconds rendered after the last event (default 2)
   --rate HZ         48000 (default) or 32000
+  --corpus NAME     use desktop/corpus/files/NAME.mid; run corpus/fetch.sh
+                    first. corpus/MANIFEST.tsv says where each one came from
+  --count-partials  after the A/B, run ab_ref ONE MORE TIME with
+                    --partial-log and report how many partials the score
+                    actually held. A separate pass on purpose: sampling
+                    changes the render chunking, and an A/B leg must not
+                    change for a measurement
 EOF
 }
 
@@ -86,6 +98,9 @@ while [ $# -gt 0 ]; do
         --out)     OUT=$2; shift 2;;
         --tail)    TAIL=$2; shift 2;;
         --rate)    RATE=$2; shift 2;;
+        --corpus)  CORPUS=$2; shift 2;;
+        --count-partials) COUNT_PARTIALS=1; shift;;
+        --partial-every)  PARTIAL_EVERY=$2; shift 2;;
         -h|--help) usage; exit 0;;
         -*)        echo "ab.sh: unknown option $1"; usage; exit 2;;
         *)         INPUT=$1; shift;;
@@ -109,6 +124,21 @@ mkdir -p $W $OUT $PREP
 rm -f $OUT/*.wav $OUT/*.txt
 
 # ------------------------------------------------------------- 1. the input --
+
+if [ -n "$CORPUS" ]; then
+    [ -z "$INPUT" ] || { echo "ab.sh: --corpus and a file are the same slot"; exit 2; }
+    INPUT=$HERE/corpus/files/$CORPUS.mid
+    if [ ! -f "$INPUT" ]; then
+        echo "ab.sh: no $INPUT"
+        echo "       ./desktop/corpus/fetch.sh     # downloads it, pinned and verified"
+        echo "       ./desktop/corpus/fetch.sh --list"
+        exit 2
+    fi
+    say "corpus: $CORPUS"
+    grep -v '^#' $HERE/corpus/MANIFEST.tsv | tail -n +2 |
+        awk -F'\t' -v n="$CORPUS" '$1 == n {
+            printf "  %s  %s@%s\n  %s\n  %s\n", $9, $2, substr($3,1,12), $4, $10 }'
+fi
 
 if [ -z "$INPUT" ]; then
     say "no input given: using conform/vectors.py's \`voice\`"
@@ -179,7 +209,8 @@ if [ ! -x "$REF" ] || [ ab/ab_ref.cpp -nt "$REF" ] ||
     done
     c++ -O2 -g -std=c++98 -fno-exceptions -fno-rtti \
         -DMTP_WITH_MT32EMU -DMTP_WITH_FAKEROM \
-        -I$ROOT/port/include -c -o $W/obj/ab_ref.o ab/ab_ref.cpp
+        -I$ROOT/port/include -I$MT32INC \
+        -c -o $W/obj/ab_ref.o ab/ab_ref.cpp
     c++ -O2 -g -std=c++98 -fno-exceptions -fno-rtti -DMTP_WITH_MT32EMU \
         -I$ROOT/port/include -I$MT32INC \
         -c -o $W/obj/engine_mt32emu.o $ROOT/port/host/engine_mt32emu.cpp
@@ -270,6 +301,37 @@ if [ "$HAVE_MUNT" = 1 ]; then
                 echo "FAILED -- see $OUT/munt-orig.txt"
             ;;
     esac
+fi
+
+# -------------------------------------------------- 4b. how many partials? --
+
+# A SEPARATE RUN, deliberately. Sampling Synth::getPartialStates() means
+# rendering on a fixed frame grid instead of in 4096-frame chunks, and while
+# that cannot change the audio -- no event lands inside a chunk either way --
+# an A/B leg that is also a measurement is a leg nobody can trust. So the legs
+# above are untouched and this renders the stream once more.
+if [ "$COUNT_PARTIALS" = 1 ]; then
+    say "counting partials (a second ab_ref pass, not an A/B leg)"
+    $REF --events $EVT --wav $W/partials-scratch.wav --engine $ENGINE $ROMARG \
+         --rate $RATE --frames $FRAMES --partials $PARTIALS \
+         --partial-log $OUT/partials.tsv --partial-every $PARTIAL_EVERY \
+         > $OUT/partials.txt 2>&1 || true
+    rm -f $W/partials-scratch.wav
+    sed -n '/^partials /p' $OUT/partials.txt | sed 's/^/  /'
+    grep -q '^partials ' $OUT/partials.txt || {
+        echo "  it did not run -- see $OUT/partials.txt"; }
+    if [ -z "$ROMS" ]; then
+        cat <<'PNOTE'
+
+  READ THIS BEFORE QUOTING THOSE NUMBERS. There are no ROMs, so every timbre
+  is the fabricated control ROM's all-zero timbre, whose common.partialMute is
+  0, and a note-on therefore allocates NO partials at all (bench/rtf_synth.cpp
+  says the same thing in its header, and bench/ANALYSIS.md 8.2 is the finding).
+  A zero here is the ROM, not the music. What the score demands, as opposed to
+  what these fabricated timbres allocate, is what corpus/scan.py measures, and
+  it needs no ROMs at all.
+PNOTE
+    fi
 fi
 
 # ------------------------------------------------------------- 5. the answer --
