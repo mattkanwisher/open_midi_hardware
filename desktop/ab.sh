@@ -58,6 +58,8 @@ MACHINE=mt32
 ENGINE=
 CORPUS=
 COUNT_PARTIALS=0
+PROBE=
+BUILD_ONLY=0
 PARTIAL_EVERY=${PARTIAL_EVERY:-128}
 RATE=${RATE:-48000}
 # Seconds rendered after the last event. 2, not a rounder number, because the
@@ -82,6 +84,13 @@ options:
   --rate HZ         48000 (default) or 32000
   --corpus NAME     use desktop/corpus/files/NAME.mid; run corpus/fetch.sh
                     first. corpus/MANIFEST.tsv says where each one came from
+  --build-only      build mt32-desktop, ab_ref and (with --roms)
+                    mt32emu-smf2wav, then stop. corpus/partials.sh uses it so
+                    that there is one build recipe in this directory, not two
+  --probe-partials K  with --count-partials: prepend corpus/probe.py's
+                    K-partial-timbre preamble, so that a score allocates
+                    partials on ROMs that carry no timbres. 1 to 4. Read
+                    corpus/probe.py's header before quoting the result
   --count-partials  after the A/B, run ab_ref ONE MORE TIME with
                     --partial-log and report how many partials the score
                     actually held. A separate pass on purpose: sampling
@@ -100,6 +109,8 @@ while [ $# -gt 0 ]; do
         --rate)    RATE=$2; shift 2;;
         --corpus)  CORPUS=$2; shift 2;;
         --count-partials) COUNT_PARTIALS=1; shift;;
+        --probe-partials) PROBE=$2; COUNT_PARTIALS=1; shift 2;;
+        --build-only)     BUILD_ONLY=1; shift;;
         --partial-every)  PARTIAL_EVERY=$2; shift 2;;
         -h|--help) usage; exit 0;;
         -*)        echo "ab.sh: unknown option $1"; usage; exit 2;;
@@ -135,6 +146,13 @@ if [ -n "$CORPUS" ]; then
         exit 2
     fi
     say "corpus: $CORPUS"
+    # Worth saying before the run rather than after it: a corpus file is
+    # General MIDI, it carries no MT-32 timbre data, and with fabricated ROMs
+    # every timbre is the all-zero one -- so every leg renders exact silence
+    # and the A/B compares nothing. abdiff.py says so too, at the end. The
+    # partial probe below is the part of a no-ROM corpus run that measures
+    # something.
+    [ -n "$ROMS" ] || echo "  no ROMs: every leg will render silence (corpus/README.md)"
     grep -v '^#' $HERE/corpus/MANIFEST.tsv | tail -n +2 |
         awk -F'\t' -v n="$CORPUS" '$1 == n {
             printf "  %s  %s@%s\n  %s\n  %s\n", $9, $2, substr($3,1,12), $4, $10 }'
@@ -248,6 +266,14 @@ if [ -n "$ROMS" ]; then
     [ -x "$SMF2WAV" ] && HAVE_MUNT=1
 fi
 
+if [ "$BUILD_ONLY" = 1 ]; then
+    echo
+    echo "built: $DESKTOP"
+    echo "built: $REF"
+    [ "$HAVE_MUNT" = 1 ] && echo "built: $SMF2WAV"
+    exit 0
+fi
+
 # ----------------------------------------------------------------- 4. runs --
 
 say "rendering"
@@ -312,7 +338,13 @@ fi
 # above are untouched and this renders the stream once more.
 if [ "$COUNT_PARTIALS" = 1 ]; then
     say "counting partials (a second ab_ref pass, not an A/B leg)"
-    $REF --events $EVT --wav $W/partials-scratch.wav --engine $ENGINE $ROMARG \
+    PEVT=$EVT
+    if [ -n "$PROBE" ]; then
+        PEVT=$PREP/$NAME-probe.evt
+        python3 corpus/probe.py "$EVT" "$PEVT" --partials "$PROBE" |
+            sed 's/^/  /'
+    fi
+    $REF --events $PEVT --wav $W/partials-scratch.wav --engine $ENGINE $ROMARG \
          --rate $RATE --frames $FRAMES --partials $PARTIALS \
          --partial-log $OUT/partials.tsv --partial-every $PARTIAL_EVERY \
          > $OUT/partials.txt 2>&1 || true
@@ -320,16 +352,24 @@ if [ "$COUNT_PARTIALS" = 1 ]; then
     sed -n '/^partials /p' $OUT/partials.txt | sed 's/^/  /'
     grep -q '^partials ' $OUT/partials.txt || {
         echo "  it did not run -- see $OUT/partials.txt"; }
-    if [ -z "$ROMS" ]; then
+    if [ -z "$ROMS" ] && [ -z "$PROBE" ]; then
         cat <<'PNOTE'
 
   READ THIS BEFORE QUOTING THOSE NUMBERS. There are no ROMs, so every timbre
   is the fabricated control ROM's all-zero timbre, whose common.partialMute is
   0, and a note-on therefore allocates NO partials at all (bench/rtf_synth.cpp
   says the same thing in its header, and bench/ANALYSIS.md 8.2 is the finding).
-  A zero here is the ROM, not the music. What the score demands, as opposed to
-  what these fabricated timbres allocate, is what corpus/scan.py measures, and
-  it needs no ROMs at all.
+  A zero here is the ROM, not the music. Add --probe-partials K to give every
+  part a timbre of exactly K partials and measure what the SCORE asks the
+  partial manager for; corpus/probe.py's header says what that answer is worth.
+PNOTE
+    elif [ -z "$ROMS" ]; then
+        cat <<PNOTE
+
+  Those counts are what THIS SCORE asks a partial manager for when every timbre
+  uses $PROBE partial(s). They are not what an MT-32 would allocate, because the
+  timbres an MT-32 would choose are in Roland's control ROM and are not here.
+  Sweep --probe-partials 1..4 to bracket it: corpus/partials.sh does the sweep.
 PNOTE
     fi
 fi

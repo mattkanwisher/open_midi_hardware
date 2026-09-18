@@ -233,12 +233,10 @@ def main(argv):
                             else os.path.basename(r['path']) for c in COLS))
         return 0
 
+    print("%79s" % "-- notes sounding, MT-32 channels --")
     print("%-26s %7s %7s %6s %5s %5s %5s %5s %5s"
           % ("file", "secs", "notes", "note/s", "sysex", "peak", "p99", "p90",
              "p50"))
-    print("%-26s %7s %7s %6s %5s %5s %5s %5s %5s"
-          % ("", "", "", "", "", "-- notes sounding, MT-32 channels --", "",
-             "", ""))
     for r in rows:
         print("%-26s %7.1f %7d %6.1f %5d %5d %5d %5d %5d"
               % (os.path.basename(r['path']), r['seconds'], r['notes'],

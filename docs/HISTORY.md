@@ -107,6 +107,7 @@ LA32 is a sequential state machine whose core operation is a table gather.
 > | Claimed | Actually |
 > |---|---|
 > | "Emulation produces no timing evidence at all" (§ 7 below) | Too strong. Emulation produces an exact **instruction count**, which is not timing but is not nothing. 16 859 armv7 instructions per frame at 32 partials, so the gate reduces to one unknown multiplier — whether an A7 sustains ≈0.75 IPC |
+> | "A real score's partial count is a property of the composer and of Roland's ROM, and this repository cannot learn it" (`bench/ANALYSIS.md` § 9.1) | Half of it can be learned, and was. The *composer* half is measurable from any score: across seven freely-licensed real pieces, six of seven reach all 32 partials with four-partial timbres and sit there for 18–38 % of their length. The *timbre* half is still Roland's and still unknown |
 > | The float renderer is "several times slower" | **1.6×** the instructions, not several times. The conclusion survives on other grounds — a serial double-precision VFP dependency chain on an in-order core, and double the temp buffers and reverb lines — but the sentence overstated it |
 > | "NEON does not help" | True of the render path (−0.03 % at 32 partials, and what little it does is in `muteSampleBuffer`). But it gives a **5.76× speed-up on PCM ROM loading** — 4.25 against 24.50 instructions per ROM byte. NEON pays for itself once, at boot, and never again |
 >

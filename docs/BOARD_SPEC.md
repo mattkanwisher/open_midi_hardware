@@ -411,7 +411,7 @@ obtained.
 
 | | Gate | Where it is answered | State |
 |---|---|---|---|
-| **1** | `mt32emu` renders faster than real time on one Cortex-A7 at 1.2 GHz — RTF ≤ 0.6 on the busiest passage | `bench/`, on real silicon with real ROMs | **`[open]` — blocks everything.** Now bounded, not blank: **16 859 armv7 instructions per frame** at 32 partials, so the gate is exactly the question "does an A7 sustain **0.749 IPC**?" (0.450 for real time at all; floor 0.225). Every known bias makes the truth worse. **A first IPC measurement needs no ROMs** — run `bench/rtf-synth` on any A7 |
+| **1** | `mt32emu` renders faster than real time on one Cortex-A7 at 1.2 GHz — RTF ≤ 0.6 on the busiest passage. **The busiest passage is the normal case, not a corner:** six of seven real scores hold all 32 partials for 18–38 % of their length | `bench/`, on real silicon with real ROMs | **`[open]` — blocks everything.** Now bounded, not blank: **16 859 armv7 instructions per frame** at 32 partials, so the gate is exactly the question "does an A7 sustain **0.749 IPC**?" (0.450 for real time at all; floor 0.225). Every known bias makes the truth worse. **A first IPC measurement needs no ROMs** — run `bench/rtf-synth` on any A7 |
 | **2** | All conformance counters (§ 8) agree across every implementation of the seam | `port/host/test.sh` | host and bare-metal QEMU pass; **the T113 implementation does not exist yet** |
 | **3** | The failure table (§ 5) behaves as specified, on the target | | `[silicon]` |
 | **4** | Latency (§ 6) measured with a scope: MIDI start bit to audio out | | `[silicon]` |

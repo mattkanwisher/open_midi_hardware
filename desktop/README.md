@@ -30,6 +30,7 @@ cmake -S desktop -B desktop/build && cmake --build desktop/build -j
                                         # same MIDI, compared sample for sample
 ./desktop/build/mt32-desktop --engine mt32emu-fakerom --midi-raw demo.syx \
         --tap-wav out.wav --seconds 4   # the real synthesiser, no Roland data
+./desktop/corpus/fetch.sh               # seven licensed MIDI files to push it
 ```
 
 Then, if you have a sound card, drop `--tap-wav` and add `--midi-seq` and plug
@@ -738,6 +739,55 @@ files is evidence this project has never had —
 
 ---
 
+## The corpus: real music, and what it measures
+
+```sh
+./desktop/corpus/fetch.sh                        # ~390 kB, pinned and verified
+python3 desktop/corpus/scan.py desktop/corpus/files/*.mid
+./desktop/ab.sh --corpus map24 --roms ~/mt32roms
+./desktop/corpus/partials.sh                     # needs no ROMs
+```
+
+Seven MIDI files from two projects that state a licence for their music —
+Freedoom (BSD-3-Clause) and OpenTTD's OpenMSX music set (GPL-2.0-only) — chosen
+out of 143 candidates for polyphony, length and event rate. They are **fetched,
+never committed**, pinned to commit hashes, with the provenance and the
+copyright holder of every file in
+[`corpus/MANIFEST.tsv`](corpus/MANIFEST.tsv). That is the same treatment
+`bench/vendor` and `boot/vendor` get, and the root `.gitignore` says why.
+
+**Be clear about which question they answer.** For "do we render the same audio
+as Munt?" the content barely matters — both sides get the same file — and this
+corpus is a convenience. For "does this sound like a real MT-32?" **it is no
+help at all**: every file is General MIDI written for a software mixer, with no
+MT-32 sysex and none of the MT-32's channel and patch conventions. The route to
+*that* question is the one above: capture a game you own through an emulator
+and render the capture. [`corpus/README.md`](corpus/README.md) will not let you
+forget the difference.
+
+What the corpus *is* for is **load**, and it closed part of an open question.
+`bench/ANALYSIS.md` § 9.1(b) says a repository with no ROMs cannot know how
+many partials a real score sounds, because that depends on Roland's timbres and
+on what the composer wrote. The timbre half stays unknown; the composer half is
+in the file, and `corpus/scan.py` and `corpus/partials.sh` measure it.
+Measured here, on these seven: **six of the seven reach the MT-32's 32-partial
+ceiling with two-partial timbres, and with four-partial timbres they sit at the
+ceiling for 18 % to 38 % of their length.** The worst case in `bench/`'s cost
+line is not a synthetic extreme; it is where real music spends its time.
+[FINDINGS.md § 11](FINDINGS.md#11-what-real-music-asks-for) has every number
+and what it does not prove.
+
+Without ROMs, note that an A/B on a corpus file compares **silence to silence**
+— a fabricated control ROM has no timbres, so nothing sounds. `ab.sh` says so
+before the run and `abdiff.py` says so after it. The part of a no-ROM corpus run
+that measures something is the partial probe:
+
+```sh
+./desktop/ab.sh --corpus map24 --count-partials --probe-partials 4
+```
+
+---
+
 ## Licences
 
 - **miniaudio** (`vendor/miniaudio/`) — public domain (Unlicense) or MIT-0, at
@@ -750,6 +800,14 @@ files is evidence this project has never had —
   in, which carries the usual obligations; the boundary is one file,
   `port/host/engine_mt32emu.cpp`, and the library is built from the unmodified
   vendored source in `bench/vendor/munt/`.
-- **Everything in `desktop/src`, `desktop/conform` and the two scripts** —
-  0BSD, like the rest of `port/`.
+- **Everything in `desktop/src`, `desktop/conform`, `desktop/ab`,
+  `desktop/corpus`'s own scripts and the shell scripts** — 0BSD, like the rest
+  of `port/`.
+- **The corpus MIDI files** — not ours and not in this repository.
+  `corpus/fetch.sh` downloads them from pinned commits, each under its own
+  project's licence: Freedoom's music is BSD-3-Clause (© 2001-2024 Contributors
+  to the Freedoom project) and OpenTTD's OpenMSX set is GPL-2.0-only (© 2010-
+  2021 OpenMSX Authors). Both require the copyright notice to travel with the
+  work, which is why `corpus/MANIFEST.tsv` names the composer of every file and
+  `fetch.sh` downloads each project's licence text beside them.
 - **ROMs** — Roland's. Dump your own. Never redistribute them.

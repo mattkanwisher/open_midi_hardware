@@ -966,3 +966,251 @@ it; it is also finer than the 17 ms our own real-time path adds.
 - **Unknown, and it takes ROMs to settle:** whether `ours` and `munt-smf2wav`
   agree at all, and if not, by how much. Everything in this section is about a
   synthesiser running on zeroes.
+
+---
+
+## 11. What real music asks for
+
+Added 2026-09-18, in answer to "can you find some public MIDI captures we can
+test with". It found seven files, and then used them to close part of an open
+question.
+
+### 11.1 The question it is actually about
+
+`bench/ANALYSIS.md` § 9.1(b) states the hole in the gate exactly:
+
+> "A real score's cost is `fixed + per-partial × (partials that passage
+> sounds)`, and this repository cannot learn the second factor: it is a
+> property of the timbres in Roland's control ROM and of what the composer
+> wrote. § 8 gives the first two terms honestly and leaves the third blank on
+> purpose."
+
+That is two unknowns treated as one. **The timbre half is Roland's and stays
+unknown here. The composer half is in any MIDI file**, and there was no reason
+to leave it blank except that nobody had looked. § 11.3 and § 11.4 are the
+measurement; § 11.5 is what it does not settle.
+
+### 11.2 What was collected, and the rule that shaped it
+
+Seven files, from two projects that state a licence for their *music* and not
+merely for their code:
+
+| name | source | commit | licence | s | note-ons |
+|---|---|---|---|---|---|
+| `map24` | `freedoom/freedoom` `musics/d_map24.mid` | `d14dbbee` | BSD-3-Clause | 234.7 | 6413 |
+| `map18` | `freedoom/freedoom` `musics/d_map18.mid` | `d14dbbee` | BSD-3-Clause | 521.2 | 7852 |
+| `dm07` | `freedoom/freedoom` `musics/d_dm07.mid` | `d14dbbee` | BSD-3-Clause | 144.0 | 8728 |
+| `inter` | `freedoom/freedoom` `musics/d_inter.mid` | `d14dbbee` | BSD-3-Clause | 74.6 | 1941 |
+| `e1m1` | `freedoom/freedoom` `musics/d_e1m1.mid` | `d14dbbee` | BSD-3-Clause | 186.2 | 4792 |
+| `rolling` | `OpenTTD/OpenMSX` `src/keep_on_rolling.mid` | `312ca0ae` | GPL-2.0-only | 195.0 | 6094 |
+| `journey` | `OpenTTD/OpenMSX` `src/tttheme2.mid` | `312ca0ae` | GPL-2.0-only | 83.9 | 4056 |
+
+Licences were read out of the source repositories at those commits:
+Freedoom's `COPYING.adoc` ("Copyright © 2001-2024 Contributors to the Freedoom
+project. … Redistribution and use in source and binary forms … are permitted
+provided that…") with `CREDITS-MUSIC` naming each track's composer, and
+OpenMSX's `LICENSE` plus `README.md` § 5.0 ("Copyright (C) 2010-2021 OpenMSX
+Authors … licensed under GPL v2") with `src/themes.list` naming each file's
+composer. `corpus/MANIFEST.tsv` carries all of that per row, plus a sha256.
+
+**They are fetched, not committed.** The root `.gitignore` already sets that
+policy for upstream material, and two of the seven are GPL-2.0-only, which has
+no business sitting inside an otherwise-0BSD tree when a pinned fetch script
+does the job. `corpus/fetch.sh` downloads from `raw.githubusercontent.com` with
+the commit hash in the URL and refuses anything whose sha256 does not match.
+
+**They are not MT-32 material and the corpus README says so twice.** Every file
+is General MIDI for a software mixer; none carries MT-32 sysex; a General MIDI
+program change means something else on an MT-32. For the A/B question — "do we
+render what Munt renders?" — the content barely matters, because both legs get
+the same file. For "does it sound like an MT-32?", **nothing here helps**, and
+the route remains capturing a game you own through the emulator plumbing in
+README.md.
+
+### 11.3 What the scores ask for, measured from the files alone
+
+`corpus/scan.py`, no rendering and no ROMs. Notes sounding simultaneously,
+damper pedal honoured, restricted to the channels a factory-reset MT-32 listens
+to — Munt's `Synth.cpp:897-903` sets `chanAssign` to `{1,2,…,9}` at reset, so
+**MIDI channel 1 and channels 11-16 are ignored entirely**. Percentiles are
+time-weighted.
+
+```
+                                           -- notes sounding, MT-32 channels --
+file                          secs   notes note/s sysex  peak   p99   p90   p50
+dm07.mid                     144.0    8728   60.6     0    20    16    12     8
+e1m1.mid                     186.2    4792   25.7     0     9     9     7     5
+inter.mid                     74.6    1941   26.0     1    16    16    16    15
+journey.mid                   83.9    4056   48.3     0    24    19    14     6
+map18.mid                    521.2    7852   15.1     0    21    19    17     8
+map24.mid                    234.7    6413   27.3     0    29    27    16     7
+rolling.mid                  195.0    6094   31.2     0    32    19    15    10
+```
+
+Three things in that table are worth pulling out.
+
+- **The 32-partial ceiling is not a corner case.** An MT-32 timbre uses one to
+  four partials, so N notes demand N to 4N partials against a machine that has
+  32. Over the **143 files scanned** to choose these seven, 117 have a peak
+  whose 4× demand reaches 32, 100 reach it at p90, and 49 reach it at the
+  *median* moment of the piece. One file (`rolling`) reaches 32 on note count
+  alone, with no multiplier at all.
+- **The damper pedal roughly doubles it.** `map24`'s peak is 29 with CC64
+  honoured and 16 without. Anything that counts simultaneous notes and ignores
+  the hold pedal is reporting about half the truth.
+- **Sysex is essentially absent from this material.** One event in 143 files: a
+  single 8-byte Universal Real Time master volume, `f0 7f 7f 04 01 7f 7f f7`,
+  in `d_inter.mid` and `d_fdmrdm.mid`. That is fine and expected —
+  `conform/vectors.py` covers sysex deliberately, including a 40 000-byte one
+  against `MTP_SYSEX_MAX`. Real files were collected for polyphony, not for
+  parser edge cases, and they do not pretend otherwise.
+
+### 11.4 What the partial manager actually holds — the measurement
+
+The file tells you what the *score* asks for. What the *synthesiser* holds is a
+different number, because the partial manager allocates, reserves and steals.
+That needed the emulator, and the emulator needed timbres, and a fabricated
+control ROM has none: `common.partialMute` is zero, so a note-on allocates no
+partials at all and an honest tool reports zero for three minutes.
+
+`corpus/probe.py` does what `bench/rtf_synth.cpp` does. The Timbre Temporary
+Area is RAM, not ROM, so it writes a timbre of exactly *K* partials into all
+eight melodic parts over ordinary Roland DT1 sysex, then lets the score play.
+`ab_ref --partial-log` samples `Synth::getPartialStates()` every 128 frames —
+the **unpacked** overload, `Synth.h:601`, not the one that packs four partials
+into a byte and cost `bench/` a long detour (`ANALYSIS.md` § 8.10).
+
+`./desktop/corpus/partials.sh`, whole pieces, 48 kHz, 128-frame sampling:
+
+```
+file        K    secs  peak   mean  p50  p90  p99   at 32
+map24       1   234.7    21  10.30   10   15   18   0.00%
+map24       2   234.7    32  20.38   20   28   32   3.88%
+map24       3   234.7    30  24.80   27   30   30   0.00%
+map24       4   234.7    32  27.17   28   32   32  35.15%
+map18       1   521.2    20   9.66    8   17   19   0.00%
+map18       2   521.2    32  17.70   16   28   32   1.65%
+map18       3   521.2    30  21.27   24   30   30   0.00%
+map18       4   521.2    32  24.95   28   32   32  22.90%
+dm07        1   144.0    19   6.95    7   11   14   0.00%
+dm07        2   144.0    32  13.87   14   22   28   0.27%
+dm07        3   144.0    30  19.35   21   30   30   0.00%
+dm07        4   144.0    32  22.43   24   32   32  30.06%
+inter       1    74.6    19  14.05   15   17   17   0.00%
+inter       2    74.6    32  24.90   26   30   30   0.99%
+inter       3    74.6    30  25.59   27   30   30   0.00%
+inter       4    74.6    32  28.00   28   32   32  38.22%
+e1m1        1   186.2    10   5.94    6    9   10   0.00%
+e1m1        2   186.2    20  11.88   12   18   20   0.00%
+e1m1        3   186.2    30  17.71   18   27   27   0.00%
+e1m1        4   186.2    32  20.95   20   28   32   4.56%
+rolling     1   195.0    21   6.64    7   11   14   0.00%
+rolling     2   195.0    32  13.24   14   22   28   0.46%
+rolling     3   195.0    30  17.45   18   30   30   0.00%
+rolling     4   195.0    32  20.07   20   32   32  25.25%
+journey     1    83.9    24   6.65    6   13   19   0.00%
+journey     2    83.9    32  12.56   12   24   32   2.32%
+journey     3    83.9    30  15.21   15   30   30   0.00%
+journey     4    83.9    32  17.74   20   32   32  18.01%
+```
+
+The measurement validates on a known answer first: `conform/vectors.py`'s
+`voice` vector installs a timbre whose `partialMute` is `0x01` and plays one
+note, and the sampler reports **peak 1, mean 1.00 of 32** over 750 samples. It
+is not guessing.
+
+The `K = 3` rows show the mechanism rather than an artefact: the peak is 30 and
+never 32, because partials are allocated three at a time and 32 is not
+divisible by 3. That is the real allocator, not a model of one.
+
+**What it says.**
+
+- With **two-partial** timbres, **six of the seven pieces reach the full 32
+  partials** at some point. Only `e1m1`, deliberately chosen as the light end,
+  does not.
+- With **four-partial** timbres, six of seven spend **18 % to 38 % of their
+  entire length pinned at 32 partials** — not a transient, a plateau. The
+  time-weighted median sits at 20 to 28 partials.
+- With **one-partial** timbres — the cheapest timbre set that can exist — the
+  mean is 5.9 to 14.1 and the peak 10 to 24. Even that floor is not a small
+  number.
+
+**What it means for § 0's gate**, using `bench/ANALYSIS.md` § 8.4's cost line
+`489.9 + 511.5 × partials` and § 8.5's 37 500 cycles per frame on one A7 core
+at 1.2 GHz and 32 kHz:
+
+| where the score sits | instr/frame | IPC needed for RTF ≤ 0.6 |
+|---|---|---|
+| 32 partials (six of seven files reach this) | 16 858 | **0.749** |
+| `map24`, K=4, time-weighted mean 27.17 | 14 387 | 0.639 |
+| `map24`, K=4, median 28 | 14 812 | 0.658 |
+| `dm07`, K=1, mean 6.95 | 4 045 | 0.180 |
+
+(16 858 is `489.9 + 511.5 × 32` as those rounded coefficients stand;
+`bench/ANALYSIS.md` § 0 quotes 16 859 from the unrounded fit. The difference is
+rounding in the published slope and changes no conclusion.)
+
+The conclusion is narrow and it is the point of the exercise: **`bench/`'s
+worst-case 32-partial figure is not a synthetic extreme. Real music reaches it,
+and with plausible timbres it stays there for a third of a piece.** Sizing the
+part for a "typical" partial count below 32 is not an option that the material
+supports. The required-IPC row that matters remains **0.749**, and the
+difference between the timbre sets is the difference between needing 0.18 and
+needing 0.75 — which is to say the timbre half of the unknown is still the
+dominant one.
+
+### 11.5 What this does not settle, stated plainly
+
+- **It is not what an MT-32 allocates.** Every timbre in the probe is one this
+  directory made up. Which timbres a real game selects is in Roland's control
+  ROM. `K = 1` is a floor for any timbre set and `K = 4` a ceiling; the truth is
+  between two rows of the table and the table cannot say where.
+- **Nothing here is a timing measurement.** The cost line is an instruction
+  count from QEMU. `bench/ANALYSIS.md` § 9 lists every bias and they all point
+  the same way. Only a Cortex-A7 on a desk answers § 0.
+- **Nothing here is about sound.** No ROM has been loaded in any session that
+  wrote any of this, and with fabricated ROMs an A/B on a corpus file compares
+  silence to silence — `ab.sh` says so before the run and `abdiff.py` after it.
+- **The probe makes three choices that are choices.** The eight melodic parts
+  are assigned to the file's eight busiest channels rather than to the factory
+  mapping (`--factory-channels` does the other thing); the rhythm part is
+  switched off, because its timbres would come from ROM rhythm timbres a
+  fabricated ROM does not have, which means every drum note in this
+  drum-heavy material contributes **zero** and the real demand is *higher* than
+  the table says; and the partial reserve is split evenly, four per part, where
+  a real MT-32 takes it from the control ROM (`Synth.cpp:897`).
+- **Program changes are stripped by the probe, and that was found by running
+  it.** With them left in, every file reported exactly zero partials for its
+  whole length: `Part::setProgram` calls `resetTimbre`, which copies the
+  all-zero ROM timbre back over the one the preamble had just written, and game
+  MIDI sends a program change on every channel in its first bar. With real ROMs
+  this does not apply — `--keep-programs`, or do not probe at all.
+
+### 11.6 What could not be got, so nobody repeats it
+
+- **The egress proxy blocks essentially everything that is not GitHub.**
+  Confirmed from this container: `mutopiaproject.org` and `imslp.org` both give
+  `curl: (56) CONNECT tunnel failed, response 403`. Earlier in the same session
+  `vgmusic.com`, `bitmidi.com`, `musescore.org`, `colinraffel.com` and
+  `magenta.tensorflow.org` all refused the connection. `api.github.com` is 403
+  for every repository but this one. **`git clone` and `raw.githubusercontent.com`
+  are the entire acquisition channel.**
+- **The Mutopia Project has no MIDI in its repository.** `MutopiaProject/
+  MutopiaProject` at `2144afd6` is 17 137 files, 10 476 of them `.ily` and
+  5 681 `.ly`: LilyPond sources. The `.mid` files Mutopia publishes are built
+  artefacts and live on the blocked website, and there is no `lilypond` in this
+  container to build them. It was the most promising public-domain source on
+  the list and it produced nothing.
+- **`cuthbertLab/music21`** (`ddf7c3eb`, BSD-3-Clause, © 2006-2026 Michael
+  Scott Asato Cuthbert) has 24 `.mid`, of which 21 are synthetic parser
+  fixtures — the one category this corpus was told not to duplicate — and the
+  rest are a Mozart quartet movement, legally usable but thinner than anything
+  already chosen.
+- **`jazz-soft/test-midi-files`** (`ee79d9e3`) has 76 `.mid` and they are all
+  generated test cases. Same reason.
+- **`mido/mido`, `craigsapp/midifile`, `FluidSynth/fluidsynth`** ship no `.mid`
+  at all. They parse MIDI; they do not carry it.
+- **No freely licensed MT-32-native material was found and none was pursued
+  past two searches.** A game's MT-32 stream belongs to the game. That is what
+  the emulator capture route in README.md is for, and it is the only honest
+  one.

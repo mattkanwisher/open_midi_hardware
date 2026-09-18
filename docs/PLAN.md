@@ -67,6 +67,29 @@ And the fallback ladder is quantified by inverting the cost line — at IPC 0.80
 all 32 partials fit inside RTF 0.6; at 0.70 the ceiling is about 30 partials;
 at 0.60, 25; at 0.50, 21; at 0.40, 17.
 
+**And the 32-partial worst case is not a synthetic extreme.** Measured
+2026-09-18 against seven freely-licensed real scores (`desktop/corpus/`), by
+giving every melodic part a timbre of exactly K partials and sampling
+`Synth::getPartialStates()` every 128 frames for the whole piece:
+
+| | K = 1 partial/timbre | K = 4 partials/timbre |
+|---|---|---|
+| Pieces reaching 32 partials | 0 of 7 | **6 of 7** |
+| Densest piece, time-weighted mean | 10.3 | **27.2** |
+| Densest piece, share of its length pinned at 32 | 0 % | **35 %** |
+
+At four-partial timbres six of the seven sit **at the 32-partial ceiling for
+18–38 % of their entire length** — a plateau, not a transient — with medians of
+20 to 28. So sizing the part for a "typical" partial count below 32 is not
+supported by real material, and **0.749 remains the number that matters.**
+
+Two honest limits on that. The timbre half of the question is still unknowable
+here: which timbres a real MT-32 picks lives in Roland's control ROM, and K = 1
+against K = 4 moves the required IPC from 0.180 to 0.749 — a far bigger lever
+than the choice of score. And the probe leaves the rhythm part switched off, so
+every drum note contributes zero and **real demand is higher than the table
+says**, not lower.
+
 **Every identified bias points the same way: the real figure will be worse.**
 QEMU counts an L1 hit and a DRAM miss identically, and the synthetic workload is
 unrealistically cache-friendly — 32 partials share one timbre and the fabricated
