@@ -1,0 +1,68 @@
+# mt32.cfg -- the settings file.
+#
+# On the finished module this is a text file in the root of the microSD card,
+# beside the ROMs. On a desktop it is ./mt32.cfg, or whatever --config names.
+# Copy this file to mt32.cfg and edit it; every line here is a default, so a
+# file that is entirely commented out behaves exactly like no file at all.
+#
+# THE RULES, in full:
+#   key = value          whitespace around '=' is optional
+#   # comment            a comment must start the line; '#' inside a value is
+#   ; comment            part of the value, because paths contain them
+#   numbers are plain decimal; booleans are on/off/yes/no/true/false/1/0
+#   a value is literal to the end of the line: no quotes, no escapes, so a
+#     path with a space in it needs nothing special
+#   an unknown key is a warning and not a failure, so an old firmware reads a
+#     new card and a new firmware reads an old one
+#
+# The command line always wins over this file.
+
+# ---- which machine, and where its ROMs are --------------------------------
+# ROMs are Roland's. Dump your own; they are never in this repository.
+#   mt32   MT32_CONTROL.ROM  + MT32_PCM.ROM
+#   cm32l  CM32L_CONTROL.ROM + CM32L_PCM.ROM
+machine     = mt32
+rom_dir     = roms
+
+# Either of these overrides rom_dir and machine, for a ROM that is not named
+# the way the table above expects.
+# control_rom = roms/MT32_CONTROL_1_07.ROM
+# pcm_rom     = roms/MT32_PCM.ROM
+
+# ---- the synthesiser -------------------------------------------------------
+#   auto             the real one if the ROMs are there, the fake one if not
+#   fake             eight decaying sine voices; no ROMs, not an MT-32
+#   mt32emu          the real one, and refuse to start without ROMs
+#   mt32emu-fakerom  the real one on fabricated ROM images: every line of the
+#                    emulator runs and the sound is meaningless. It is what the
+#                    cross-implementation conformance run uses
+engine      = auto
+partials    = 32
+reverb      = on
+
+# ---- timing ----------------------------------------------------------------
+# These are port/DESIGN.md 2.2's numbers, and they are the T113's: 128 frames
+# is 2.67 ms at 48 kHz, and three blocks is 8 ms of audio in flight. A desktop
+# often needs a deeper ring than the target does -- see README.md, Latency.
+rate        = 48000
+block       = 128
+ring        = 3
+lookahead   = 0
+
+# ---- MIDI ------------------------------------------------------------------
+# 31250 is MIDI. It is a setting only so that a bench rig can run a capture
+# faster than the wire.
+midi_baud   = 31250
+
+# ---- logging ---------------------------------------------------------------
+#   error | warn | info | debug
+log         = info
+
+# ---- desktop only ----------------------------------------------------------
+# The module has one I2S port and one UART and nothing to choose, so it ignores
+# every key below with the same warning any unknown key gets. That is what the
+# prefix is for: one card can carry the settings for both.
+# desktop_audio     = auto
+# desktop_device    = USB Audio
+# desktop_periods   = 3
+# desktop_status_ms = 500

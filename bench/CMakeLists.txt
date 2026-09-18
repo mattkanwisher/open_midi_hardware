@@ -47,13 +47,32 @@ set(libmt32emu_WITH_VERSION_TAGGING OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${MUNT_DIR}/mt32emu" "${CMAKE_CURRENT_BINARY_DIR}/mt32emu" EXCLUDE_FROM_ALL)
 
+# MT32EMU_WITH_TESTING exports MT32Emu::Test::getControlROMMap(), which is the
+# one internal accessor rtf-synth needs to fabricate a control ROM that
+# Synth::open() accepts. It adds two thin wrapper functions to the library and
+# changes nothing else; see Synth.cpp:2912 and ROMInfo.cpp:393. The same switch
+# is used by emu/Makefile for the same reason.
+target_compile_definitions(mt32emu PRIVATE MT32EMU_WITH_TESTING)
+
 # --- the harness ----------------------------------------------------------
 
 add_executable(rtf rtf.cpp)
 target_link_libraries(rtf PRIVATE mt32emu)
 
+# --- the ROM-free cost harness -------------------------------------------
+# rtf-synth runs without ROMs, on FABRICATED ones, and measures cost as a
+# function of a controlled partial count. It is not a substitute for rtf; read
+# the banner at the top of rtf_synth.cpp and bench/ANALYSIS.md section 9 before
+# quoting anything it prints.
+add_executable(rtf-synth rtf_synth.cpp)
+target_link_libraries(rtf-synth PRIVATE mt32emu)
+# Internal headers: Structures.h (TimbreParam, ControlROMMap, the sysex address
+# macros). Deliberate, and confined to the bench.
+target_include_directories(rtf-synth PRIVATE "${MUNT_DIR}/mt32emu/src")
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(rtf PRIVATE -Wall -Wextra)
+  target_compile_options(rtf-synth PRIVATE -Wall -Wextra)
   # -ffast-math is deliberately NOT used: mt32emu's float renderer is an
   # accuracy model, and reassociation would change the audio. If you want to
   # know what it buys, measure it as a separate build, do not make it default.
@@ -64,6 +83,7 @@ include(CheckLibraryExists)
 check_library_exists(rt clock_gettime "" HAVE_LIBRT)
 if(HAVE_LIBRT)
   target_link_libraries(rtf PRIVATE rt)
+  target_link_libraries(rtf-synth PRIVATE rt)
 endif()
 
 # --- footprint ------------------------------------------------------------

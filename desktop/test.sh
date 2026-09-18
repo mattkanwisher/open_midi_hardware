@@ -196,6 +196,91 @@ print("ok   tty source: 31250 baud set, 49 bytes parsed" if ok else
 sys.exit(0 if ok else 1)
 PYTTY
 
+# --- 9. the deterministic raw source: same bytes in, same PCM out ----------
+# --midi-fifo cannot promise this and does not claim to: it is read by the
+# poll thread, so an event can land one pump call later and therefore 128
+# frames later. --midi-raw is pulled on the render thread, which is what makes
+# desktop/conform.sh's comparison against port/host and emu/ mean anything.
+$BIN $COMMON --midi-raw demo.syx --seconds 1 --tap-wav det1.wav > rA1.txt 2>&1 || true
+$BIN $COMMON --midi-raw demo.syx --seconds 1 --tap-wav det2.wav > rA2.txt 2>&1 || true
+if cmp -s det1.wav det2.wav; then
+    echo "ok   --midi-raw is reproducible (two runs, byte-identical wav)"
+else
+    echo "FAIL --midi-raw produced different audio on two runs"; fail=1
+fi
+grep -E "^messages" rA1.txt | grep -q "8 short, 1 sysex, 1 realtime" \
+  && echo "ok   --midi-raw parsed the demo stream" \
+  || { echo "FAIL --midi-raw parse: $(grep -E '^messages' rA1.txt)"; fail=1; }
+
+# --- 10. mt32.cfg ----------------------------------------------------------
+cat > t.cfg <<'CFG'
+# a comment, and a blank line follow
+
+block = 256
+ring=8
+reverb = off
+machine = cm32l
+desktop_status_ms = 0
+nonsense_key = 3
+a line with no equals sign
+CFG
+$BIN --audio null --engine fake --config t.cfg --midi-raw demo.syx \
+     --seconds 1 --status-ms 0 > rB.txt 2>&1 || true
+expect_grep "config: file read"        "config t.cfg: 9 lines, 6 settings" rB.txt
+expect_grep "config: unknown key warns" "unknown key 'nonsense_key'"       rB.txt
+expect_grep "config: bad line warns"    "no '=' -- ignored"                rB.txt
+expect_grep "config: block applied"     "64 frames/block"                  rB.txt
+expect_grep "config: ring applied"      "ring 6"                           rB.txt
+expect_grep "config: machine applied"   "CM32L_CONTROL.ROM"                rB.txt
+# ... and the command line beats the file.
+$BIN --audio null --engine fake --config t.cfg --block 512 --ring 8 \
+     --midi-raw demo.syx --seconds 1 --status-ms 0 > rC.txt 2>&1 || true
+expect_grep "config: command line wins" "512 frames/block"                 rC.txt
+
+# --- 11. the real synthesiser, on fabricated ROMs --------------------------
+# This is the one case that runs every line of mt32emu -- the C++ runtime, the
+# allocations Synth::open() makes, the LA32 -- with no Roland data anywhere.
+if $BIN --help | grep -q mt32emu-fakerom; then
+    python3 ../../conform/vectors.py . > /dev/null
+    $BIN --audio null --engine mt32emu-fakerom --ring 8 --status-ms 0 \
+         --midi-raw voice.syx --seconds 1 --counters --tap-wav voice.wav \
+         > rD.txt 2>&1 || true
+    expect_grep "fakerom: the synth opened" "engine              mt32emu-fakerom" rD.txt
+    expect "fakerom underruns"  "^underruns"           0 rD.txt
+    expect "fakerom midi bytes" "^midi bytes"        318 rD.txt
+    expect "fakerom sysex"      "^sysex messages"      3 rD.txt
+    peak=$(grep "^pcm peak" rD.txt | awk '{print $NF}')
+    if [ "${peak:-0}" -gt 1000 ]; then
+        echo "ok   fakerom rendered audible output (peak $peak)"
+    else
+        echo "FAIL fakerom rendered peak '$peak'; the voice vector should not"
+        echo "     be silent -- see conform/vectors.py"
+        fail=1
+    fi
+    # The same engine on the demo stream *is* silent, and that is not a bug:
+    # the fabricated PCM ROM is zeroes and the machine's power-on state has
+    # master volume 0. Asserting it keeps the distinction on the record.
+    $BIN --audio null --engine mt32emu-fakerom --ring 8 --status-ms 0 \
+         --midi-raw demo.syx --seconds 1 --counters > rE.txt 2>&1 || true
+    expect "fakerom demo is silent" "^pcm nonzero samples" 0 rE.txt
+    expect_grep "and says why" "the fabricated PCM ROM is all zeroes" rE.txt
+else
+    echo "skip mt32emu-fakerom cases (built without it)"
+fi
+
+# --- 12. --counters prints the shared contract, in the shared words --------
+# port/host/main.c and emu/src/main.c print these lines; desktop/conform.sh
+# asserts across all three. If this drifts, the three-way comparison silently
+# stops comparing.
+$BIN $COMMON --midi-raw demo.syx --seconds 1 --counters > rF.txt 2>&1 || true
+for line in "^engine  " "^output  " "^blocks committed" "^midi bytes" \
+            "^short messages" "^sysex messages" "^parser: short" \
+            "^parser: orphan data" "^engine back-pressure" "^underruns" \
+            "^worst render" "^min ring occupancy"; do
+    grep -qE "$line" rF.txt || { echo "FAIL --counters is missing '$line'"; fail=1; }
+done
+echo "ok   --counters prints the whole shared counter contract"
+
 echo
 [ "$fail" = "0" ] && echo "all tests passed" || echo "SOME TESTS FAILED"
 exit $fail

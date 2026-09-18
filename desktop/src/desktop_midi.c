@@ -65,6 +65,7 @@ static unsigned        g_ndesc;
 
 static int             g_have_seq;
 static int             g_have_smf;
+static int             g_have_raw;
 static int             g_live_sources;       /* sources that never end */
 static int             g_open;
 static pthread_t       g_thread;
@@ -175,6 +176,15 @@ mtp_status desktop_midi_add_smf(const char *path, int loop)
     return MTP_OK;
 }
 
+mtp_status desktop_midi_add_raw(const char *path, uint32_t baud, int paced)
+{
+    mtp_status s = draw_open(path, baud, paced);
+    if (s != MTP_OK) return s;
+    g_have_raw = 1;
+    add_desc("raw %s%s", path, paced ? " (paced at 31250 baud)" : " (unpaced)");
+    return MTP_OK;
+}
+
 mtp_status desktop_midi_add_seq(const char *connect_to)
 {
     mtp_status s = dseq_open(connect_to);
@@ -271,7 +281,9 @@ mtp_status mtp_midi_open(uint32_t baud)
     (void)baud;   /* per-source; desktop_midi_add_tty() takes it */
     if (g_open) return MTP_ERR_STATE;
 
-    if (g_nfds == 0u && !g_have_seq && !g_have_smf)
+    if (g_have_raw) draw_start();
+
+    if (g_nfds == 0u && !g_have_seq && !g_have_smf && !g_have_raw)
         MTP_LOGW("no MIDI source configured: the synth will be silent");
 
     if (g_nfds > 0u || g_have_seq) {
@@ -299,6 +311,7 @@ void mtp_midi_close(void)
     }
     if (g_have_seq) dseq_close();
     if (g_have_smf) dsmf_close();
+    if (g_have_raw) draw_close();
     for (i = 0; i < g_nfds; i++)
         if (g_fds[i].close_on_exit && g_fds[i].fd >= 0) close(g_fds[i].fd);
     if (g_wake_pipe[0] >= 0) { close(g_wake_pipe[0]); close(g_wake_pipe[1]); }
@@ -315,6 +328,7 @@ size_t mtp_midi_read(mtp_midi_byte *dst, size_t max)
      * clock the render loop reads, so its events land on the sample they were
      * written for instead of on a scheduler tick. */
     if (g_have_smf) dsmf_pump();
+    if (g_have_raw) draw_pump();
 
     pthread_mutex_lock(&g_mtx);
     while (n < max && g_head != g_tail) {
@@ -351,7 +365,8 @@ int mtp_midi_eof(void)
     live  = g_live_sources;
     pthread_mutex_unlock(&g_mtx);
     if (live > 0) return 0;                    /* a wire is never finished */
-    if (g_have_smf) return dsmf_eof() && empty;
+    if (g_have_smf && !(dsmf_eof() && empty)) return 0;
+    if (g_have_raw && !(draw_eof() && empty)) return 0;
     return empty;
 }
 

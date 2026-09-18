@@ -191,6 +191,89 @@ _start:
 
     .size _start, . - _start
 
+/* ------------------------------------------------------- secondary core --
+ *
+ * This is the entry point PSCI CPU_ON is given, and it exists for exactly one
+ * experiment: port/PORTING.md section 5 found that mt32emu's MIDI event queue
+ * synchronises producer and consumer with `volatile` alone, which is not
+ * sufficient on a weakly-ordered dual-core Cortex-A7, and port/DESIGN.md's
+ * answer is to keep MIDI and rendering on one core. src/smp.c tries to make
+ * that hazard fire. Nothing in the product runs here -- the render loop is
+ * single-core by design and stays that way.
+ *
+ * Entry state from PSCI: SVC (or whatever the implementation's PL1 default
+ * is), MMU off, caches off, interrupts masked, at the physical address.
+ * So this is the same handover _start gets, minus the loader registers, and
+ * the sequence below is _start's steps 3-9 with the BSS clear left out --
+ * core 0 did that and clearing it twice would erase core 0's state.
+ */
+    .global _secondary_start
+    .type _secondary_start, %function
+_secondary_start:
+    cpsid   if
+    mrs     r0, cpsr
+    bic     r0, r0, #0x1F
+    orr     r0, r0, #0x13
+    msr     cpsr_c, r0
+    mrc     p15, 0, r0, c1, c0, 0
+    bic     r0, r0, #(1 << 1)           /* SCTLR.A = 0                      */
+    bic     r0, r0, #(1 << 13)          /* low vectors + VBAR               */
+    mcr     p15, 0, r0, c1, c0, 0
+    isb
+
+    /* Its own stacks. A secondary that shares core 0's stack corrupts it on
+     * the first function call, and the symptom is a wild branch a long way
+     * from the cause. */
+    msr     cpsr_c, #(0x11 | 0xC0)      /* FIQ */
+    ldr     sp, =__sec_stack_fiq_top
+    msr     cpsr_c, #(0x1B | 0xC0)      /* UND */
+    ldr     sp, =__sec_stack_und_top
+    msr     cpsr_c, #(0x17 | 0xC0)      /* ABT */
+    ldr     sp, =__sec_stack_abt_top
+    msr     cpsr_c, #(0x12 | 0xC0)      /* IRQ */
+    ldr     sp, =__sec_stack_irq_top
+    msr     cpsr_c, #(0x13 | 0xC0)      /* SVC */
+    ldr     sp, =__sec_stack_svc_top
+
+    ldr     r0, =_vectors
+    mcr     p15, 0, r0, c12, c0, 0
+    isb
+
+    mov     r0, #0
+    mcr     p15, 0, r0, c7, c5, 0       /* ICIALLU                          */
+    mcr     p15, 0, r0, c7, c5, 6       /* BPIALL                           */
+    mcr     p15, 0, r0, c8, c7, 0       /* TLBIALL                          */
+    dsb
+    isb
+    bl      v7_dcache_invalidate_all
+
+    /* VFP, because the C it calls is compiled -mfpu=neon-vfpv4 and GCC will
+     * emit VFP register saves in a prologue whether or not a float appears. */
+    mrc     p15, 0, r0, c1, c0, 2
+    orr     r0, r0, #(0xF << 20)
+    bic     r0, r0, #(1 << 31)
+    bic     r0, r0, #(1 << 30)
+    mcr     p15, 0, r0, c1, c0, 2
+    isb
+    mov     r0, #(1 << 30)
+    vmsr    fpexc, r0
+
+    /* The MMU matters more here than anywhere else in this file. With it off,
+     * ARMv7-A treats every access as Strongly Ordered, which is exactly the
+     * memory type that CANNOT reorder -- so a litmus test run with the MMU off
+     * is guaranteed to observe nothing and would prove the opposite of what it
+     * looks like it proves. emu_mmu_enable() rebuilds the same flat table with
+     * identical descriptor values and points TTBR0 at it, so running it on
+     * both cores is idempotent. */
+#if defined(EMU_MMU) && EMU_MMU
+    bl      emu_mmu_enable
+#endif
+
+    bl      emu_secondary_main
+1:  wfi
+    b       1b
+    .size _secondary_start, . - _secondary_start
+
 /* ------------------------------------------------- D-cache invalidate all */
 /* The standard ARMv7 set/way walk, from the ARM ARM B2.2.4 example. Only run
  * at reset, where invalidate (not clean) is what we want: the caches are off

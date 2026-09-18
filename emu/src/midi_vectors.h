@@ -4,8 +4,22 @@
 #define MIDI_VECTORS_H
 #include <stdint.h>
 
+/* What the contract in port/include/mtp_midi_parser.h says
+ * this stream must produce. Computed by a second
+ * implementation of that contract in tools/gen_vectors.py. */
+typedef struct {
+    uint32_t short_msgs;
+    uint32_t sysex_msgs;
+    uint32_t realtime;
+    uint32_t orphan_data;
+    uint32_t sysex_truncated;
+    uint32_t sysex_aborted;
+    uint32_t sysex_bytes;    /* total bytes delivered, F0..F7 */
+    uint32_t sysex_hash;     /* FNV-1a over all of them       */
+} midi_expect;
+
 typedef struct { const char *name; const uint8_t *bytes;
-                 uint32_t len; } midi_vector;
+                 uint32_t len; midi_expect expect; } midi_vector;
 extern const midi_vector midi_vectors[];
 
 extern const uint8_t midi_demo[];
@@ -14,5 +28,13 @@ extern const uint8_t midi_bank[];
 extern const uint32_t midi_bank_len;
 extern const uint8_t midi_bad[];
 extern const uint32_t midi_bad_len;
+extern const uint8_t midi_rtsysex[];
+extern const uint32_t midi_rtsysex_len;
+extern const uint8_t midi_runstat[];
+extern const uint32_t midi_runstat_len;
+extern const uint8_t midi_panic[];
+extern const uint32_t midi_panic_len;
+extern const uint8_t midi_trunc[];
+extern const uint32_t midi_trunc_len;
 
 #endif

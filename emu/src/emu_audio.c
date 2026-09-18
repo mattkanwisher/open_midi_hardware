@@ -64,6 +64,7 @@ int      vsnd_ready(void);
 uint32_t vsnd_completed(void);
 unsigned vsnd_outstanding(void);
 uint32_t vsnd_max_burst(void);
+uint32_t vsnd_service_gap_us(void);
 
 #define MAX_BLOCKS 8u
 
@@ -85,20 +86,95 @@ static uint32_t g_period_us;
 /* Which sink. "timer" is the default and is the one whose underrun count is
  * the conformance contract; "virtio" hands the same blocks to a real device
  * model and lets the device be the clock. */
-typedef enum { SINK_TIMER = 0, SINK_VIRTIO } sink_kind;
+/* SINK_FREE is a measuring instrument, not a sink: it retires each block the
+ * instant it is committed, so the render loop never waits and the run's wall
+ * time is the time the pipeline actually spent computing. That makes
+ * wall/audio a real-time factor -- of a fictional machine, see below -- rather
+ * than the 1.000 that a paced sink necessarily produces. It cannot underrun
+ * and its underrun counter means nothing; test.sh never asserts on it. */
+typedef enum { SINK_TIMER = 0, SINK_VIRTIO, SINK_FREE } sink_kind;
 static sink_kind g_sink = SINK_TIMER;
 static int       g_sink_requested_virtio;
+static int       g_sink_requested_free;
 
 int strcmp(const char *a, const char *b);
 
 void emu_audio_set_sink(const char *name)
 {
     g_sink_requested_virtio = (name && strcmp(name, "virtio") == 0);
+    g_sink_requested_free   = (name && (strcmp(name, "none") == 0 ||
+                                        strcmp(name, "free") == 0));
 }
 
 const char *emu_audio_sink_name(void)
 {
-    return g_sink == SINK_VIRTIO ? "virtio-sound" : "timer/discard";
+    return g_sink == SINK_VIRTIO ? "virtio-sound"
+         : g_sink == SINK_FREE   ? "free-run (unpaced, for RTF only)"
+                                 : "timer/discard";
+}
+
+/* ---- underrun forensics ------------------------------------------------
+ *
+ * "underruns 12" does not say whether the box clicked twelve times or stopped
+ * working. An I2S ring that goes dry once, refills and carries on is a click;
+ * one that goes dry and never recovers is a dead product, and the counter
+ * looks the same from a distance. These three numbers tell them apart:
+ *
+ *   bursts        how many separate episodes (a click each)
+ *   worst run     the longest unbroken sequence of dry periods
+ *   recovery      sink periods from the end of the FIRST episode until the
+ *                 ring was back at the render loop's target occupancy
+ *
+ * Recovery is the one that answers "does it resync or drift for ever", and
+ * because the tick rearms from an absolute compare value (src/timer.c), a
+ * recovered ring is back on the original deadline sequence, not on a
+ * shifted one. */
+static uint32_t g_ur_bursts;
+static uint32_t g_ur_run;
+static uint32_t g_ur_worst_run;
+static uint32_t g_ur_recover;      /* periods spent recovering              */
+static int      g_ur_recovering;
+static int      g_ur_recovered;    /* first episode already accounted for   */
+static uint32_t g_target_queued;   /* what the render loop aims to hold     */
+
+/* Deliberate producer stall, for the underrun-recovery case. Applied in
+ * acquire(), i.e. immediately before block N is rendered, so from the sink's
+ * point of view it is indistinguishable from a render() that overran its
+ * deadline by the same amount -- which is the failure being modelled. */
+static uint32_t g_stall_at = 0xFFFFFFFFu;
+static uint32_t g_stall_us;
+static int      g_stalled;
+
+void emu_audio_set_stall(uint32_t at_block, uint32_t us)
+{
+    g_stall_at = us ? at_block : 0xFFFFFFFFu;
+    g_stall_us = us;
+    g_stalled  = 0;
+}
+
+uint32_t emu_audio_ur_bursts(void)    { return g_ur_bursts; }
+uint32_t emu_audio_ur_worst_run(void) { return g_ur_worst_run; }
+uint32_t emu_audio_ur_recover(void)   { return g_ur_recover; }
+uint32_t emu_audio_period_us(void)    { return g_period_us; }
+
+/* Called from the sink's completion context, once per consumed period. */
+static void underrun_bookkeeping(int dry)
+{
+    if (dry) {
+        if (g_ur_run == 0u) g_ur_bursts++;
+        g_ur_run++;
+        if (g_ur_run > g_ur_worst_run) g_ur_worst_run = g_ur_run;
+        if (!g_ur_recovered) g_ur_recovering = 1;
+        return;
+    }
+    g_ur_run = 0u;
+    if (g_ur_recovering) {
+        g_ur_recover++;
+        if (g_committed - g_played >= g_target_queued) {
+            g_ur_recovering = 0;
+            g_ur_recovered  = 1;
+        }
+    }
 }
 
 /* --- the wav tap ------------------------------------------------------- */
@@ -131,11 +207,13 @@ static void block_consumed(void)
 {
     if (g_committed == g_played) {
         g_underruns++;                  /* the DMA played silence           */
+        underrun_bookkeeping(1);
         return;
     }
     checksum_block(g_played % g_cfg.block_count);
     __asm__ volatile("dmb" ::: "memory");
     g_played++;
+    underrun_bookkeeping(0);
 }
 
 /* SINK_VIRTIO: runs in the virtio-mmio used-buffer interrupt. The device has
@@ -145,11 +223,14 @@ static void block_consumed(void)
  * precisely the condition that makes an I2S DMA ring click. */
 static void virtio_block_done(void)
 {
-    if (g_committed == g_played) { g_underruns++; return; }
+    if (g_committed == g_played) {
+        g_underruns++; underrun_bookkeeping(1); return;
+    }
     checksum_block(g_played % g_cfg.block_count);
     __asm__ volatile("dmb" ::: "memory");
     g_played++;
-    if (g_committed == g_played) g_underruns++;
+    underrun_bookkeeping(0);
+    if (g_committed == g_played) { g_underruns++; underrun_bookkeeping(1); }
 }
 
 /* --- mtp_audio.h -------------------------------------------------------- */
@@ -184,6 +265,11 @@ mtp_status mtp_audio_open(const mtp_audio_config *cfg)
     g_played    = 0u;
     g_underruns = 0u;
     g_checksum  = 2166136261u;
+    g_ur_bursts = g_ur_run = g_ur_worst_run = g_ur_recover = 0u;
+    g_ur_recovering = g_ur_recovered = 0;
+    /* Exactly what main() hands mtp_render_init(): the loop stops filling at
+     * block_count - 1 (port/DESIGN.md 2.2, "target occupancy"). */
+    g_target_queued = cfg->block_count > 1u ? cfg->block_count - 1u : 1u;
 
     if (g_wav_path) {
         /* 4 MB caps a run at ~21 s of 48 kHz stereo. Beyond that the sink
@@ -204,7 +290,9 @@ mtp_status mtp_audio_open(const mtp_audio_config *cfg)
     if (period_us == 0u) period_us = 1u;
 
     g_sink = SINK_TIMER;
-    if (g_sink_requested_virtio) {
+    if (g_sink_requested_free) {
+        g_sink = SINK_FREE;
+    } else if (g_sink_requested_virtio) {
         if (vsnd_open(cfg->sample_rate, cfg->channels,
                       g_block_samples * 2u, cfg->block_count,
                       virtio_block_done) == 0) {
@@ -301,6 +389,16 @@ int16_t *mtp_audio_acquire(void)
 {
     if (!g_open) return NULL;
     if (g_committed - g_played >= g_cfg.block_count) return NULL;
+    if (g_committed == g_stall_at && !g_stalled) {
+        /* The injected deadline overrun. Burn the time with interrupts still
+         * enabled, so the sink keeps consuming and keeps counting, exactly as
+         * an I2S DMA engine would while the CPU was stuck in a long render. */
+        g_stalled = 1;
+        MTP_LOGW("stall: holding the producer for %u us before block %u "
+                 "(%u block periods)", g_stall_us, g_stall_at,
+                 g_stall_us / (g_period_us ? g_period_us : 1u));
+        mtp_time_delay_us(g_stall_us);
+    }
     return g_ring + (g_committed % g_cfg.block_count) * g_block_samples;
 }
 
@@ -336,6 +434,16 @@ void mtp_audio_commit(void)
             return;                     /* do not advance: the block is ours */
         }
         g_committed++;
+        return;
+    }
+
+    if (g_sink == SINK_FREE) {
+        /* No clock at all: the block is consumed the instant it exists, so
+         * mtp_audio_acquire() never returns NULL and the render loop never
+         * waits. wall/audio then measures the pipeline, not the metronome. */
+        checksum_block(g_committed % g_cfg.block_count);
+        g_committed++;
+        g_played++;
         return;
     }
 
@@ -379,3 +487,5 @@ uint32_t emu_audio_virtio_completed(void)
 { return g_sink == SINK_VIRTIO ? vsnd_completed() : 0u; }
 uint32_t emu_audio_virtio_max_burst(void)
 { return g_sink == SINK_VIRTIO ? vsnd_max_burst() : 0u; }
+uint32_t emu_audio_service_gap_us(void)
+{ return g_sink == SINK_VIRTIO ? vsnd_service_gap_us() : g_period_us; }

@@ -15,6 +15,9 @@
  *            that a keyboard or a DAW can be routed to.
  *   smf      a Standard MIDI File, played out against the clock, for
  *            unattended runs.
+ *   raw      a file of raw MIDI bytes, pulled on the render thread. Unpaced it
+ *            is bit-for-bit reproducible, which is what the cross-
+ *            implementation conformance run needs; paced it is a wire.
  *
  * Every source converts to the same thing: bytes with arrival timestamps,
  * pushed into one FIFO, parsed by port/src/mtp_midi_parser.c exactly as on the
@@ -32,6 +35,11 @@
 mtp_status desktop_midi_add_tty(const char *path, uint32_t baud);
 mtp_status desktop_midi_add_fifo(const char *path);   /* "-" means stdin */
 mtp_status desktop_midi_add_smf(const char *path, int loop);
+/* A raw byte stream from a file, pulled on the render thread. paced == 0 is
+ * deterministic and is what desktop/conform.sh compares against port/host and
+ * emu/; paced == 1 releases bytes at 31250 baud against the same clock the
+ * render loop reads. */
+mtp_status desktop_midi_add_raw(const char *path, uint32_t baud, int paced);
 mtp_status desktop_midi_add_seq(const char *connect_to); /* NULL = just listen */
 
 /* Producer side, called from source threads. t_us is mtp_time_us(). */

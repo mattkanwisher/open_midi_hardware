@@ -35,7 +35,25 @@ set(CMAKE_SIZE         ${CROSS_PREFIX}size         CACHE FILEPATH "")
 # -mcpu=cortex-a7 implies -march=armv7-a and the A7 scheduling model.
 # -mthumb: the A7 runs Thumb-2 at full speed and it is markedly smaller, which
 # matters if we ever want this resident in SRAM. Flip to -marm to compare.
-set(T113_ARCH_FLAGS "-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -mthumb")
+#
+# Three knobs, so that the claims in ANALYSIS.md about NEON, Thumb-2 and -O
+# level can be re-measured rather than asserted. bench/estimate.sh uses them:
+#
+#   -DT113_FPU=vfpv3-d16   a build with NO NEON at all, for the NEON ablation
+#   -DT113_ISA=-marm       ARM rather than Thumb-2
+#   -DT113_OPT=-O3         -O3 rather than -O2
+#
+if(NOT DEFINED T113_FPU)
+  set(T113_FPU neon-vfpv4)
+endif()
+if(NOT DEFINED T113_ISA)
+  set(T113_ISA "-mthumb")
+endif()
+if(NOT DEFINED T113_OPT)
+  set(T113_OPT "-O2")
+endif()
+
+set(T113_ARCH_FLAGS "-mcpu=cortex-a7 -mfpu=${T113_FPU} -mfloat-abi=hard ${T113_ISA}")
 
 set(CMAKE_C_FLAGS_INIT   "${T113_ARCH_FLAGS}")
 set(CMAKE_CXX_FLAGS_INIT "${T113_ARCH_FLAGS}")
@@ -43,8 +61,8 @@ set(CMAKE_CXX_FLAGS_INIT "${T113_ARCH_FLAGS}")
 # -O2 rather than -O3: mt32emu's hot loops are branchy per-sample state
 # machines, and -O3's extra unrolling and vectorisation attempts mostly cost
 # I-cache here. Measure both before believing either.
-set(CMAKE_C_FLAGS_RELEASE_INIT   "-O2 -DNDEBUG")
-set(CMAKE_CXX_FLAGS_RELEASE_INIT "-O2 -DNDEBUG")
+set(CMAKE_C_FLAGS_RELEASE_INIT   "${T113_OPT} -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE_INIT "${T113_OPT} -DNDEBUG")
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM BEFORE)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)

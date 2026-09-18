@@ -40,6 +40,15 @@ typedef struct {
     uint32_t parse_aborted;    /* sysex interrupted by a status byte     */
     uint32_t backpressure;     /* engine refused an event                */
     uint32_t ring_peak;        /* peak MIDI FIFO occupancy, in bytes     */
+    uint32_t midi_frame_errors;/* UART framing/parity; always 0 on POSIX */
+    /* What actually came out. The digest is the cheapest possible answer to
+     * "did this build render the same audio as that one": one FNV-1a pass
+     * over each committed block, in producer context. desktop/conform.sh
+     * compares whole WAV files, but the digest is what a person reads. */
+    uint32_t pcm_hash;
+    uint64_t pcm_frames;
+    int32_t  pcm_peak;
+    uint64_t pcm_nonzero;
     /* How the audio device behaved. On the T113 these describe the I2S DMA
      * completion interrupt; here they describe the OS, and the difference is
      * the single biggest way this build is not the target. */
@@ -59,6 +68,17 @@ void desktop_status_tick(const desktop_status_sample *s);
 /* Erases the in-progress status line so a log line can be written over it.
  * Called by desktop_log.c; a no-op when the status line is off. */
 void desktop_status_clear_line(void);
+
+/* The counter block port/host/main.c and emu/src/main.c print, in the same
+ * words, so that one set of assertions can be made against all three
+ * implementations of the seam -- docs/PLAN.md section 0.5 rule 2. Printed
+ * only with --counters, because the human summary below says the same things
+ * better for a human. */
+void desktop_status_counters(const desktop_status_sample *s,
+                             const char *engine_name,
+                             uint32_t sample_rate,
+                             uint32_t frames_per_block,
+                             uint32_t ring_blocks);
 
 /* The full report, at the end of a run. */
 void desktop_status_summary(const desktop_status_sample *s,

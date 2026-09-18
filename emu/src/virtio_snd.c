@@ -92,6 +92,14 @@ static struct snd_status *g_status;
 
 static volatile uint32_t g_completed;
 static volatile uint32_t g_max_burst;   /* completions reclaimed in one IRQ    */
+/* How often the consumer actually looks. This is the number FINDINGS.md 7's
+ * "second constraint on ring depth" needs: a ring must hold at least one of
+ * the consumer's service intervals, whatever the renderer is doing. Measured
+ * here, in guest microseconds, as the longest gap between two used-buffer
+ * notifications once the stream is running. */
+static volatile uint32_t g_service_gap_max_us;
+static volatile uint32_t g_service_gap_last_us;
+static uint32_t          g_last_irq_us;
 static void (*g_on_complete)(void);
 
 /* Control-queue round trip, polled. Only used during setup, where blocking is
@@ -140,6 +148,13 @@ static void snd_isr(void)
     uint32_t st = virtio_irq_status(&g_dev);
     if (st & 1u) {                      /* used buffer notification */
         uint32_t burst = 0u;
+        uint32_t now = mtp_time_us();
+        if (g_last_irq_us) {
+            uint32_t gap = now - g_last_irq_us;
+            g_service_gap_last_us = gap;
+            if (gap > g_service_gap_max_us) g_service_gap_max_us = gap;
+        }
+        g_last_irq_us = now;
         while (virtq_reclaim(&g_txq, NULL) >= 0) {
             g_completed++;
             burst++;
@@ -253,6 +268,9 @@ int vsnd_open(uint32_t rate, uint16_t channels, uint32_t period_bytes,
     g_on_complete = on_complete;
     g_completed = 0u;
     g_max_burst = 0u;
+    g_service_gap_max_us = 0u;
+    g_service_gap_last_us = 0u;
+    g_last_irq_us = 0u;
     emu_gic_set_handler(g_dev.irq, snd_isr);
     emu_gic_enable(g_dev.irq, 0x80u);
     emu_irq_enable();
@@ -302,3 +320,4 @@ int      vsnd_ready(void)       { return g_ready; }
 uint32_t vsnd_completed(void)   { return g_completed; }
 unsigned vsnd_outstanding(void) { return virtq_outstanding(&g_txq); }
 uint32_t vsnd_max_burst(void)   { return g_max_burst; }
+uint32_t vsnd_service_gap_us(void) { return g_service_gap_max_us; }

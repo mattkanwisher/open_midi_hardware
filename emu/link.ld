@@ -132,6 +132,18 @@ SECTIONS
         __stack_limit = . - SVC_STACK;
     } > RAM
 
+    /* Stacks for a second core, used only by the SMP litmus experiment in
+     * src/smp.c. 16 KB, and it is NOLOAD, so an image that never starts a
+     * second core pays nothing for it in the .bin. */
+    .sec_stacks (NOLOAD) : ALIGN(16)
+    {
+        . += 1K;  __sec_stack_fiq_top = .;
+        . += 2K;  __sec_stack_und_top = .;
+        . += 2K;  __sec_stack_abt_top = .;
+        . += 3K;  __sec_stack_irq_top = .;
+        . += 8K;  __sec_stack_svc_top = .;
+    } > RAM
+
     .heap (NOLOAD) : ALIGN(4096)
     {
         __heap_start = .;

@@ -17,3 +17,8 @@ roms/
 # Harness output
 *.csv
 *.wav
+
+# estimate.sh output
+results/
+build-armv7-count/
+build-armv7-noneon/

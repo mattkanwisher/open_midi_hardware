@@ -40,6 +40,8 @@ static uint32_t g_us_per_byte;
 static uint64_t g_t0;
 static int      g_paced;
 static const char *g_name = "(none)";
+static const midi_expect *g_expect;
+static const midi_expect g_no_expect = { 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u };
 
 int strcmp(const char *a, const char *b);
 
@@ -52,12 +54,22 @@ void emu_midi_select(const char *name, int paced)
             g_data = v->bytes;
             g_len  = v->len;
             g_name = v->name;
+            g_expect = &v->expect;
             return;
         }
     }
     g_data = NULL;
     g_len  = 0u;
     g_name = "(none)";
+    g_expect = &g_no_expect;
+}
+
+/* What tools/gen_vectors.py's independent model of
+ * port/include/mtp_midi_parser.h says this stream must produce. main() prints
+ * measured against expected; test.sh asserts that they agree. */
+const midi_expect *emu_midi_expect(void)
+{
+    return g_expect ? g_expect : &g_no_expect;
 }
 
 const char *emu_midi_name(void) { return g_name; }

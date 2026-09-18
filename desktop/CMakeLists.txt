@@ -40,6 +40,8 @@ add_executable(mt32-desktop
   src/desktop_midi.c
   src/desktop_midi_tty.c
   src/desktop_midi_smf.c
+  src/desktop_midi_raw.c
+  src/desktop_config.c
   src/desktop_storage_posix.c
   src/desktop_time_posix.c
   src/desktop_log.c
@@ -120,6 +122,34 @@ if(MT32EMU_SOURCE_DIR AND EXISTS "${MT32EMU_SOURCE_DIR}/CMakeLists.txt")
   target_link_libraries(mt32-desktop PRIVATE MT32Emu::mt32emu)
   message(STATUS "mt32-desktop: linking mt32emu from ${MT32EMU_SOURCE_DIR}")
   message(STATUS "mt32-desktop: mt32emu is LGPL 2.1 -- see README.md, Licences")
+
+  # The real synthesiser on fabricated ROM images, so that this build makes a
+  # sound end to end on a machine that has no Roland data -- and so that the
+  # audio it renders can be compared, sample for sample, against port/host and
+  # against the bare-metal image. The fixture is emu/'s, compiled from where it
+  # lives and never modified: one implementation of the trick, not three.
+  # It needs MT32Emu::Test::getControlROMMap, which upstream exports only when
+  # the library is compiled with MT32EMU_WITH_TESTING (Synth.cpp:2912).
+  set(FAKEROM_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../emu/src/engine_mt32emu_fake_roms.cpp")
+  if(EXISTS "${FAKEROM_SRC}")
+    target_compile_definitions(mt32emu PRIVATE MT32EMU_WITH_TESTING)
+    target_sources(mt32-desktop PRIVATE ${FAKEROM_SRC})
+    target_compile_definitions(mt32-desktop PRIVATE MTP_WITH_FAKEROM)
+    # It includes <mt32emu/Structures.h>, which is a *private* header: upstream
+    # copies only the public ones into the build tree (CMakeLists.txt:297).
+    # Stage the rest beside them, inside our own build directory -- nothing
+    # under bench/ is written to, which is the rule this repository keeps.
+    file(GLOB MT32EMU_PRIVATE_HEADERS "${MT32EMU_SOURCE_DIR}/src/*.h")
+    file(COPY ${MT32EMU_PRIVATE_HEADERS}
+         DESTINATION "${CMAKE_BINARY_DIR}/mt32emu/include/mt32emu")
+    target_include_directories(mt32-desktop PRIVATE
+                               "${CMAKE_BINARY_DIR}/mt32emu/include")
+    message(STATUS "mt32-desktop: --engine mt32emu-fakerom available "
+                   "(emu/src/engine_mt32emu_fake_roms.cpp)")
+  else()
+    message(STATUS "mt32-desktop: no emu/src/engine_mt32emu_fake_roms.cpp -- "
+                   "--engine mt32emu-fakerom unavailable")
+  endif()
 else()
   message(STATUS "mt32-desktop: fake engine only "
                  "(-DMT32EMU_SOURCE_DIR=<path to munt/mt32emu> to add the real one)")

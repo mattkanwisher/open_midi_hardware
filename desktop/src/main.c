@@ -24,6 +24,7 @@
 #include "mtp_render.h"
 
 #include "desktop_audio.h"
+#include "desktop_config.h"
 #include "desktop_midi.h"
 #include "desktop_status.h"
 
@@ -33,6 +34,10 @@
 #include <string.h>
 
 void desktop_storage_set_root(const char *r);
+
+#ifdef MTP_WITH_FAKEROM
+extern const mtp_engine_vtable mtp_engine_mt32emu_fakerom;
+#endif
 
 static volatile sig_atomic_t g_quit;
 static void on_signal(int sig) { (void)sig; g_quit = 1; }
@@ -51,6 +56,11 @@ static void usage(const char *argv0)
 "  --midi-seq [SRC]       OS MIDI port: ALSA sequencer on Linux, CoreMIDI on\n"
 "                         macOS. SRC is a client:port, or a name to match\n"
 "  --midi-fifo PATH       named pipe (created if absent); '-' means stdin\n"
+"  --midi-raw FILE        a file of raw MIDI bytes, delivered all at once.\n"
+"                         Deterministic: same bytes in, same PCM out, which is\n"
+"                         what desktop/conform.sh compares between builds\n"
+"  --midi-wire FILE[,BAUD] the same file, released at 31250 baud against the\n"
+"                         render clock: the arrival pattern of a real cable\n"
 "  --midi-smf FILE        play a Standard MIDI File and exit\n"
 "  --midi-loop            keep replaying the SMF\n"
 "  --list-midi            list the OS MIDI ports that can send to us\n"
@@ -67,7 +77,15 @@ static void usage(const char *argv0)
 #ifdef MTP_WITH_MT32EMU
                                               ", mt32emu"
 #endif
+#ifdef MTP_WITH_FAKEROM
+                                                        ", mt32emu-fakerom"
+#endif
                                                         "\n"
+#ifdef MTP_WITH_FAKEROM
+"                         mt32emu-fakerom is the real synthesiser opened on\n"
+"                         fabricated ROM images: every line of mt32emu runs,\n"
+"                         and the sound is meaningless. See FINDINGS.md\n"
+#endif
 "  --roms DIR             directory holding the ROM images\n"
 "  --machine NAME         mt32 (default) or cm32l; picks the ROM file names\n"
 "  --control-rom PATH     control ROM, overriding --roms/--machine\n"
@@ -83,6 +101,11 @@ static void usage(const char *argv0)
 "  --seconds S            stop after S seconds (0 = until Ctrl-C)\n"
 "\n"
 "Reporting:\n"
+"  --config FILE          settings file, default ./mt32.cfg if it exists.\n"
+"                         The same format the SD card will carry; the command\n"
+"                         line wins over it. See README.md, \"Configuration\"\n"
+"  --counters             also print the counter block port/host and emu/\n"
+"                         print, in the same words, for conformance tests\n"
 "  --status-ms N          status line interval, default 500; 0 turns it off\n"
 "  -v                     debug logging\n"
 "  -q                     errors only\n",
@@ -91,17 +114,17 @@ static void usage(const char *argv0)
 
 int main(int argc, char **argv)
 {
-    const char *engine_name = "auto";
-    const char *roms_dir = "roms";
-    const char *machine = "mt32";
+    static desktop_config cfg;       /* ~800 B of strings: not on the stack */
+    const char *cfg_path = NULL;
+    const char *engine_name, *roms_dir, *machine;
     const char *control_rom = NULL, *pcm_rom = NULL;
-    const char *audio_backend = "auto", *audio_device = NULL, *tap = NULL;
+    const char *audio_backend, *audio_device = NULL, *tap = NULL;
     const char *smf = NULL;
-    int   smf_loop = 0, reverb = 1, verbose = 0, quiet = 0, i;
-    uint32_t rate = 48000, block = 128, ring = 3, lookahead = 0, partials = 32;
-    unsigned periods = 3, status_ms = 500;
+    int   smf_loop = 0, reverb, verbose = 0, quiet = 0, i;
+    uint32_t rate, block, ring, lookahead, partials, midi_baud;
+    unsigned periods, status_ms;
     double seconds = 0.0;
-    int have_source = 0;
+    int have_source = 0, counters = 0;
 
     char ctrl_buf[1024], pcm_buf[1024];
     const mtp_engine_vtable *vt = NULL;
@@ -118,12 +141,48 @@ int main(int argc, char **argv)
     mtp_time_init();
     mtp_log_init(MTP_LOG_INFO);
 
+    /* ---- mt32.cfg, before anything else -------------------------------
+     * The card is read first and the command line overrides it, which is the
+     * order a headless box needs: the file is the standing configuration and
+     * the flags are what you are trying right now. --config is found in a
+     * pre-pass because it has to be honoured before the settings it changes
+     * are read. */
+    desktop_storage_set_root(".");
+    mtp_storage_mount();
+    desktop_config_defaults(&cfg);
+    for (i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "--config") && i + 1 < argc) cfg_path = argv[++i];
+    if (cfg_path) {
+        if (desktop_config_load(&cfg, cfg_path) != MTP_OK) {
+            MTP_LOGE("--config '%s' could not be read", cfg_path);
+            return 1;
+        }
+    } else {
+        (void)desktop_config_load(&cfg, "mt32.cfg");   /* absent is normal */
+    }
+    engine_name   = cfg.engine;
+    roms_dir      = cfg.rom_dir;
+    machine       = cfg.machine;
+    audio_backend = cfg.audio;
+    if (cfg.control_rom[0]) control_rom = cfg.control_rom;
+    if (cfg.pcm_rom[0])     pcm_rom     = cfg.pcm_rom;
+    if (cfg.device[0])      audio_device = cfg.device;
+    rate      = cfg.rate;      block     = cfg.block;
+    ring      = cfg.ring;      lookahead = cfg.lookahead;
+    partials  = cfg.partials;  midi_baud = cfg.midi_baud;
+    reverb    = cfg.reverb;    periods   = cfg.periods;
+    status_ms = cfg.status_ms;
+    if (!strcmp(cfg.log, "debug")) verbose = 1;
+    else if (!strcmp(cfg.log, "error") || !strcmp(cfg.log, "warn")) quiet = 1;
+
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
         #define NEXT(var) do { if (i + 1 >= argc) { MTP_LOGE("%s needs a value", a); return 2; } var = argv[++i]; } while (0)
         if (!strcmp(a, "--help") || !strcmp(a, "-h")) { usage(argv[0]); return 0; }
         else if (!strcmp(a, "-v")) verbose = 1;
         else if (!strcmp(a, "-q")) quiet = 1;
+        else if (!strcmp(a, "--counters")) counters = 1;
+        else if (!strcmp(a, "--config")) { const char *v; NEXT(v); (void)v; }
         else if (!strcmp(a, "--audio"))      NEXT(audio_backend);
         else if (!strcmp(a, "--device"))     NEXT(audio_device);
         else if (!strcmp(a, "--tap-wav"))    NEXT(tap);
@@ -150,12 +209,25 @@ int main(int argc, char **argv)
         }
         else if (!strcmp(a, "--list-midi")) { desktop_midi_list_ports(); return 0; }
         else if (!strcmp(a, "--midi-tty")) {
-            const char *v; char dev[512]; char *comma; uint32_t baud = 31250;
+            const char *v; char dev[512]; char *comma; uint32_t baud = midi_baud;
             NEXT(v);
             snprintf(dev, sizeof(dev), "%s", v);
             comma = strchr(dev, ',');
             if (comma) { *comma = 0; baud = (uint32_t)atoi(comma + 1); }
             if (desktop_midi_add_tty(dev, baud) != MTP_OK) return 1;
+            have_source = 1;
+        }
+        else if (!strcmp(a, "--midi-raw") || !strcmp(a, "--midi-wire")) {
+            const char *v; char file[512]; char *comma;
+            uint32_t baud = midi_baud;
+            int paced = !strcmp(a, "--midi-wire");
+            NEXT(v);
+            snprintf(file, sizeof(file), "%s", v);
+            comma = strrchr(file, ',');
+            if (comma && comma[1] >= '0' && comma[1] <= '9') {
+                *comma = 0; baud = (uint32_t)atoi(comma + 1);
+            }
+            if (desktop_midi_add_raw(file, baud, paced) != MTP_OK) return 1;
             have_source = 1;
         }
         else if (!strcmp(a, "--midi-fifo")) {
@@ -191,9 +263,9 @@ int main(int argc, char **argv)
     if (block < 16u || block > 4096u){ MTP_LOGE("--block must be 16..4096"); return 2; }
 
     /* ---- storage and ROM paths ---------------------------------------- */
+    /* Storage was mounted before the config file was read, at the top. */
 
-    desktop_storage_set_root(".");
-    mtp_storage_mount();
+    desktop_config_report(&cfg);
 
     if (!control_rom || !pcm_rom) {
         const char *cn = !strcmp(machine, "cm32l") ? "CM32L_CONTROL.ROM"
@@ -213,6 +285,15 @@ int main(int argc, char **argv)
 #ifdef MTP_WITH_MT32EMU
     } else if (!strcmp(engine_name, "mt32emu")) {
         vt = &mtp_engine_mt32emu;
+#ifdef MTP_WITH_FAKEROM
+    } else if (!strcmp(engine_name, "mt32emu-fakerom")) {
+        /* The real library on fabricated ROM images. Every line of mt32emu
+         * runs -- the C++ runtime, Synth::open()'s allocations, the LA32 --
+         * and the sound is meaningless, because the PCM ROM is zeroes. It is
+         * how this build proves the synthesiser itself is identical to the
+         * bare-metal one without Roland's data. emu/src/engine_mt32emu_fake_roms.cpp */
+        vt = &mtp_engine_mt32emu_fakerom;
+#endif
     } else if (!strcmp(engine_name, "auto")) {
         if (mtp_storage_exists(control_rom) && mtp_storage_exists(pcm_rom)) {
             vt = &mtp_engine_mt32emu;
@@ -273,7 +354,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    s = mtp_midi_open(31250);
+    s = mtp_midi_open(midi_baud);
     if (s != MTP_OK) { MTP_LOGE("midi did not open: %s", mtp_strerror(s)); return 1; }
 
     s = mtp_render_init(&ctx, vt, inst, block, rate, ring - 1u, lookahead);
@@ -332,6 +413,9 @@ int main(int argc, char **argv)
         st.parse_aborted   = ctx.parser.stat_sysex_aborted;
         st.backpressure    = ctx.stats.engine_backpressure;
         st.ring_peak       = desktop_midi_ring_peak();
+        st.midi_frame_errors = mtp_midi_frame_errors();
+        desktop_audio_pcm_digest(&st.pcm_hash, &st.pcm_frames);
+        desktop_audio_pcm_level(&st.pcm_peak, &st.pcm_nonzero);
         desktop_status_tick(&st);
 
         if (seconds > 0.0 && (double)st.audio_us / 1e6 >= seconds) break;
@@ -348,7 +432,10 @@ int main(int argc, char **argv)
     desktop_audio_callback_stats(&st.dev_calls, &st.dev_max_frames,
                                  &st.dev_worst_gap_us);
     desktop_audio_wait_stats(&st.waits, &st.wait_timeouts, &st.wait_worst_us);
+    desktop_audio_pcm_digest(&st.pcm_hash, &st.pcm_frames);
+    desktop_audio_pcm_level(&st.pcm_peak, &st.pcm_nonzero);
     desktop_status_summary(&st, vt->name, rate, block, ring);
+    if (counters) desktop_status_counters(&st, vt->name, rate, block, ring);
 
     mtp_midi_close();
     mtp_audio_close();

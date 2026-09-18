@@ -74,6 +74,48 @@ void desktop_status_tick(const desktop_status_sample *s)
     fflush(stderr);
 }
 
+void desktop_status_counters(const desktop_status_sample *s,
+                             const char *engine_name,
+                             uint32_t sample_rate,
+                             uint32_t frames_per_block,
+                             uint32_t ring_blocks)
+{
+    double audio_s = (double)s->audio_us / 1e6;
+    double wall_s  = (double)s->wall_us / 1e6;
+
+    desktop_status_clear_line();
+    printf("\n--- run ---\n");
+    printf("engine              %s\n", engine_name);
+    printf("output              %u Hz, %u frames/block, ring %u\n",
+           sample_rate, frames_per_block, ring_blocks);
+    printf("blocks committed    %u  (%.3f s of audio)\n", s->blocks, audio_s);
+    printf("wall time           %.3f s\n", wall_s);
+    if (audio_s > 0.0)
+        printf("real-time factor    %.3f\n", wall_s / audio_s);
+    printf("midi bytes          %u\n", s->midi_bytes);
+    printf("short messages      %u\n", s->short_msgs);
+    printf("sysex messages      %u\n", s->sysex_msgs);
+    printf("parser: short %u sysex %u realtime %u\n",
+           s->short_msgs, s->sysex_msgs, s->realtime_msgs);
+    printf("parser: orphan data %u, sysex truncated %u, sysex aborted %u\n",
+           s->parse_dropped, s->parse_truncated, s->parse_aborted);
+    printf("engine back-pressure %u\n", s->backpressure);
+    printf("underruns           %u\n", s->underruns);
+    printf("worst render        %u us  (block period %u us)\n",
+           s->worst_render_us, s->block_period_us);
+    printf("min ring occupancy  %u of %u\n",
+           s->min_queued == 0xFFFFFFFFu ? 0u : s->min_queued, ring_blocks);
+    /* Beyond the shared contract, and the reason --counters is worth having
+     * on a desktop at all: a fingerprint of the audio itself. */
+    printf("midi fifo overruns  %u\n", s->midi_overruns);
+    printf("midi frame errors   %u\n", s->midi_frame_errors);
+    printf("pcm frames          %llu\n", (unsigned long long)s->pcm_frames);
+    printf("pcm peak            %ld\n", (long)s->pcm_peak);
+    printf("pcm nonzero samples %llu\n", (unsigned long long)s->pcm_nonzero);
+    printf("pcm fnv1a           0x%08x\n", s->pcm_hash);
+    printf("--- end ---\n");
+}
+
 void desktop_status_summary(const desktop_status_sample *s,
                             const char *engine_name,
                             uint32_t sample_rate,
@@ -131,11 +173,27 @@ void desktop_status_summary(const desktop_status_sample *s,
     printf("messages             %u short, %u sysex, %u realtime\n",
            s->short_msgs, s->sysex_msgs, s->realtime_msgs);
     printf("midi fifo peak       %u bytes\n", s->ring_peak);
-    printf("midi fifo overruns   %u\n", s->midi_overruns);
+    printf("midi fifo overruns   %u%s\n", s->midi_overruns,
+           s->midi_overruns ? "   <-- MIDI bytes were lost before the parser"
+                            : "");
     printf("parse: orphan data   %u\n", s->parse_dropped);
     printf("parse: sysex > 32 kB %u\n", s->parse_truncated);
     printf("parse: sysex aborted %u\n", s->parse_aborted);
-    printf("engine back-pressure %u\n", s->backpressure);
+    printf("engine back-pressure %u%s\n", s->backpressure,
+           s->backpressure ? "   <-- the synth refused events; they were retried"
+                           : "");
+    printf("\n");
+    printf("audio out            %llu frames, peak %ld, %llu non-zero samples\n",
+           (unsigned long long)s->pcm_frames, (long)s->pcm_peak,
+           (unsigned long long)s->pcm_nonzero);
+    printf("audio fingerprint    0x%08x  (FNV-1a over every committed sample)\n",
+           s->pcm_hash);
+    if (s->pcm_frames && s->pcm_nonzero == 0u)
+        printf("  Every sample committed was zero. The path to the device is\n"
+               "  working -- %u blocks went through it -- so this is the engine\n"
+               "  being silent, not the plumbing. With --engine mt32emu-fakerom\n"
+               "  that is expected: the fabricated PCM ROM is all zeroes.\n",
+               s->blocks);
     printf("\n");
     printf("real-time factor     %.4f average, %.4f peak over a "
            "%u ms window\n", rtf_avg, g_rtf_peak, g_interval_ms);

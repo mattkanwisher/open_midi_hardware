@@ -38,6 +38,22 @@ void desktop_audio_callback_stats(uint32_t *calls, uint32_t *max_frames,
 void desktop_audio_wait_stats(uint32_t *waits, uint32_t *timeouts,
                               uint32_t *worst_us);
 
+/* FNV-1a over every int16 sample of every block committed, starting from 0 --
+ * starting from the standard FNV offset basis. emu/src/emu_audio.c computes
+ * the same hash over the blocks its sink *consumed* and starts from 0 instead,
+ * so the two numbers are not interchangeable -- deliberately noted rather than
+ * quietly matched, because a hash that starts at 0 is 0 for any length of
+ * silence. It is a fingerprint of the rendered audio that costs one pass over
+ * a block already in L1, and it turns "did this build produce the same sound
+ * as that one" into a one-line answer that needs no WAV file.
+ * *frames is the number of frames it covers. */
+void desktop_audio_pcm_digest(uint32_t *hash, uint64_t *frames);
+
+/* Peak absolute sample and the number of non-zero samples committed. Cheap,
+ * and the fastest way to tell "silent because the engine is silent" from
+ * "silent because nothing reached the device". */
+void desktop_audio_pcm_level(int32_t *peak, uint64_t *nonzero);
+
 void desktop_audio_list_devices(void);
 
 #endif /* DESKTOP_AUDIO_H */

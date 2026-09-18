@@ -75,9 +75,9 @@ LDLIBS  := $(LIBM) $(LIBGCC)
 SRC_ASM := src/start.S
 SRC_C   := src/mmu.c src/console.c src/gic.c src/timer.c src/semihost.c \
            src/printf.c src/retarget.c src/dma.c \
-           src/virtio.c src/virtio_snd.c \
+           src/virtio.c src/virtio_snd.c src/smp.c \
            src/emu_audio.c src/emu_midi.c src/emu_storage.c src/emu_log.c \
-           src/midi_vectors.c src/main.c \
+           src/engine_probe.c src/midi_vectors.c src/main.c \
            $(PORT)/src/mtp_midi_parser.c $(PORT)/src/mtp_render.c \
            $(PORT)/host/engine_fake.c
 

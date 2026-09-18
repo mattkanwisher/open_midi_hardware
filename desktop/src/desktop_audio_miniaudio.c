@@ -75,6 +75,10 @@ static char              g_device_name[256];
 static unsigned          g_periods = 3;
 static FILE             *g_tap;
 static uint64_t          g_tap_frames;
+static uint32_t          g_pcm_hash = 2166136261u;  /* FNV-1a, standard basis */
+static uint64_t          g_pcm_frames;
+static int32_t           g_pcm_peak;
+static uint64_t          g_pcm_nonzero;
 static uint32_t          g_block_period_us = 2667;
 
 /* ------------------------------------------------------------------ */
@@ -258,6 +262,7 @@ mtp_status mtp_audio_open(const mtp_audio_config *cfg)
     atomic_store(&g_tail, 0u);
     atomic_store(&g_underruns, 0u);
     atomic_store(&g_waiters, 0u);
+    g_pcm_hash = 2166136261u; g_pcm_frames = 0u; g_pcm_peak = 0; g_pcm_nonzero = 0u;
     g_read_off = 0;
     g_acquired = NULL;
 
@@ -371,7 +376,25 @@ int16_t *mtp_audio_acquire(void)
 void mtp_audio_commit(void)
 {
     unsigned head;
+    unsigned i, n;
     if (!g_acquired) return;
+
+    /* Fingerprint and level, in producer context, over a block that is still
+     * in L1 because we have just written it. Same FNV-1a as emu/'s sink. */
+    n = (unsigned)g_cfg.frames_per_block * g_cfg.channels;
+    {
+        uint32_t h = g_pcm_hash;
+        for (i = 0; i < n; i++) {
+            int16_t v = g_acquired[i];
+            int32_t a = v < 0 ? -(int32_t)v : (int32_t)v;
+            h = (h ^ (uint32_t)(uint16_t)v) * 16777619u;
+            if (a > g_pcm_peak) g_pcm_peak = a;
+            if (v) g_pcm_nonzero++;
+        }
+        g_pcm_hash = h;
+        g_pcm_frames += g_cfg.frames_per_block;
+    }
+
     if (g_tap) {
         fwrite(g_acquired, sizeof(int16_t),
                (size_t)g_cfg.frames_per_block * g_cfg.channels, g_tap);
@@ -435,6 +458,18 @@ mtp_status mtp_audio_wait(uint32_t timeout_us)
             atomic_store_explicit(&g_wait_worst_us, took, memory_order_relaxed);
     }
     return rc;
+}
+
+void desktop_audio_pcm_digest(uint32_t *hash, uint64_t *frames)
+{
+    if (hash)   *hash   = g_pcm_hash;
+    if (frames) *frames = g_pcm_frames;
+}
+
+void desktop_audio_pcm_level(int32_t *peak, uint64_t *nonzero)
+{
+    if (peak)    *peak    = g_pcm_peak;
+    if (nonzero) *nonzero = g_pcm_nonzero;
 }
 
 void desktop_audio_callback_stats(uint32_t *calls, uint32_t *max_frames,

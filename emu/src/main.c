@@ -32,6 +32,22 @@
 #ifdef MTP_WITH_MT32EMU
 extern const mtp_engine_vtable mtp_engine_mt32emu_fakerom;
 #endif
+extern const mtp_engine_vtable mtp_engine_probe;
+
+/* src/engine_probe.c */
+void     probe_set_queue_cap(uint32_t n);
+uint32_t probe_sysex_hash(void);
+uint32_t probe_sysex_bytes(void);
+uint32_t probe_sysex_msgs(void);
+uint32_t probe_sysex_longest(void);
+uint32_t probe_short_msgs(void);
+uint32_t probe_realtime_msgs(void);
+uint32_t probe_short_hash(void);
+uint32_t probe_panic_msgs(void);
+uint32_t probe_refusals(void);
+
+/* src/smp.c */
+int emu_smp_run(const char *conduit, uint32_t mp_iters, uint32_t sb_iters);
 
 int printf(const char *fmt, ...);
 size_t strlen(const char *s);
@@ -49,6 +65,13 @@ uint32_t emu_audio_dma_used(void);
 void emu_storage_set_root(const char *r);
 uint32_t emu_audio_checksum(void);
 uint32_t emu_audio_played(void);
+void emu_audio_set_stall(uint32_t at_block, uint32_t us);
+uint32_t emu_audio_ur_bursts(void);
+uint32_t emu_audio_ur_worst_run(void);
+uint32_t emu_audio_ur_recover(void);
+uint32_t emu_audio_period_us(void);
+uint32_t emu_audio_service_gap_us(void);
+const midi_expect *emu_midi_expect(void);
 
 extern char __image_start[], __image_end[], __bss_start[], __bss_end[];
 extern char __data_start[], __data_end[], __heap_start[], __heap_end[];
@@ -150,6 +173,10 @@ int main(void)
     const char *control_rom = NULL, *pcm_rom = NULL;
     uint32_t rate = 48000u, block = 128u, ring = 3u, lookahead = 0u;
     uint32_t seconds_x1000 = 4000u;
+    uint32_t baud = 31250u, queue_cap = 0u;
+    uint32_t stall_at = 0u, stall_us = 0u;
+    const char *smp_conduit = NULL;
+    uint32_t smp_mp = 1000000u, smp_sb = 1000000u;
     int realtime = 0, verbose = 0, i;
     uint32_t heap_after_open = 0u;
 
@@ -182,6 +209,17 @@ int main(void)
         else if (!strcmp(a, "--ring")   && i + 1 < g_argc) ring = (uint32_t)atou(g_argv[++i]);
         else if (!strcmp(a, "--seconds")&& i + 1 < g_argc) seconds_x1000 = atomilli(g_argv[++i]);
         else if (!strcmp(a, "--lookahead") && i + 1 < g_argc) lookahead = (uint32_t)atou(g_argv[++i]);
+        /* --baud is not a knob the product has: DIN MIDI is 31250 and that is
+         * that. It exists so that a stream arriving FASTER than the wire
+         * allows -- a merger, a USB bridge, a host that buffers and bursts --
+         * can be aimed at the pipeline and the drop threshold measured. */
+        else if (!strcmp(a, "--baud")   && i + 1 < g_argc) baud = (uint32_t)atou(g_argv[++i]);
+        else if (!strcmp(a, "--engine-queue") && i + 1 < g_argc) queue_cap = (uint32_t)atou(g_argv[++i]);
+        else if (!strcmp(a, "--stall-at") && i + 1 < g_argc) stall_at = (uint32_t)atou(g_argv[++i]);
+        else if (!strcmp(a, "--stall-us") && i + 1 < g_argc) stall_us = (uint32_t)atou(g_argv[++i]);
+        else if (!strcmp(a, "--smp")    && i + 1 < g_argc) smp_conduit = g_argv[++i];
+        else if (!strcmp(a, "--smp-mp") && i + 1 < g_argc) smp_mp = (uint32_t)atou(g_argv[++i]);
+        else if (!strcmp(a, "--smp-sb") && i + 1 < g_argc) smp_sb = (uint32_t)atou(g_argv[++i]);
         else if (!strcmp(a, "--realtime")) realtime = 1;
         else if (!strcmp(a, "-v")) verbose = 1;
     }
@@ -216,6 +254,9 @@ int main(void)
 
     if (!strcmp(engine_name, "fake")) {
         vt = &mtp_engine_fake;
+    } else if (!strcmp(engine_name, "probe")) {
+        vt = &mtp_engine_probe;
+        probe_set_queue_cap(queue_cap);
 #ifdef MTP_WITH_MT32EMU
     } else if (!strcmp(engine_name, "mt32emu")) {
         vt = &mtp_engine_mt32emu;
@@ -229,7 +270,7 @@ int main(void)
 #ifdef MTP_WITH_MT32EMU
                  ", mt32emu, mt32emu-fakerom"
 #endif
-                 ")", engine_name);
+                 ", probe)", engine_name);
         emu_exit(2);
     }
 
@@ -271,7 +312,8 @@ int main(void)
     s = mtp_audio_open(&acfg);
     if (s != MTP_OK) { MTP_LOGE("audio open: %s", mtp_strerror(s)); emu_exit(1); }
 
-    s = mtp_midi_open(31250u);
+    emu_audio_set_stall(stall_at, stall_us);
+    s = mtp_midi_open(baud);
     if (s != MTP_OK) { MTP_LOGE("midi open: %s", mtp_strerror(s)); emu_exit(1); }
 
     s = mtp_render_init(&g_ctx, vt, inst, block, rate, ring - 1u, lookahead);
@@ -325,9 +367,56 @@ int main(void)
         printf("worst render        %u us  (block period %u us)\n",
                g_ctx.stats.worst_render_us,
                (uint32_t)(((uint64_t)block * 1000000ull) / rate));
+        printf("worst block         %u us  (whole iteration: drain + render)\n",
+               g_ctx.stats.worst_block_us);
         printf("min ring occupancy  %u of %u\n",
                g_ctx.stats.min_queued == 0xFFFFFFFFu ? 0u : g_ctx.stats.min_queued,
                ring);
+
+        /* --- underrun forensics. See emu_audio.c: the plain count cannot
+         * tell a click from a dead product. --- */
+        printf("underrun bursts     %u  (worst run %u periods, "
+               "recovery %u periods)\n",
+               emu_audio_ur_bursts(), emu_audio_ur_worst_run(),
+               emu_audio_ur_recover());
+        printf("sink service gap    %u us  (block period %u us)\n",
+               emu_audio_service_gap_us(), emu_audio_period_us());
+
+        /* --- the parser contract, measured against an independent model of
+         * port/include/mtp_midi_parser.h computed by tools/gen_vectors.py.
+         * MISMATCH here means the C parser and the written contract disagree,
+         * and test.sh greps for exactly that word. --- */
+        {
+            const midi_expect *e = emu_midi_expect();
+            int ok = (g_ctx.parser.stat_short == e->short_msgs)
+                  && (g_ctx.parser.stat_sysex == e->sysex_msgs)
+                  && (g_ctx.parser.stat_realtime == e->realtime)
+                  && (g_ctx.parser.stat_dropped_data == e->orphan_data)
+                  && (g_ctx.parser.stat_sysex_truncated == e->sysex_truncated)
+                  && (g_ctx.parser.stat_sysex_aborted == e->sysex_aborted);
+            printf("expected            short %u sysex %u realtime %u "
+                   "orphan %u trunc %u abort %u\n",
+                   e->short_msgs, e->sysex_msgs, e->realtime,
+                   e->orphan_data, e->sysex_truncated, e->sysex_aborted);
+            printf("parser vs contract  %s\n", ok ? "MATCH" : "MISMATCH");
+            if (vt == &mtp_engine_probe) {
+                int hok = (probe_sysex_bytes() == e->sysex_bytes)
+                       && (probe_sysex_hash() == e->sysex_hash);
+                printf("engine saw          %u sysex, %u bytes, longest %u, "
+                       "%u short, %u realtime, %u panic CCs\n",
+                       probe_sysex_msgs(), probe_sysex_bytes(),
+                       probe_sysex_longest(), probe_short_msgs(),
+                       probe_realtime_msgs(), probe_panic_msgs());
+                printf("sysex payload hash  0x%08x (expected 0x%08x)\n",
+                       probe_sysex_hash(), e->sysex_hash);
+                printf("sysex vs contract   %s\n", hok ? "MATCH" : "MISMATCH");
+                printf("engine refusals     %u\n", probe_refusals());
+                printf("short msgs lost     %u  (parser emitted %u, engine "
+                       "accepted %u)\n",
+                       g_ctx.parser.stat_short - probe_short_msgs(),
+                       g_ctx.parser.stat_short, probe_short_msgs());
+            }
+        }
 
         /* ---- and what only the bare-metal run can say ---- */
         printf("stream              %s, %u bytes%s\n", emu_midi_name(),
@@ -356,7 +445,15 @@ int main(void)
     vt->close(inst);
     mtp_storage_unmount();
 
-    emu_exit(g_ctx.stats.underruns ? 1 : 0);
+    /* The dual-core experiment runs last, after the audio path has been torn
+     * down, so it cannot perturb any of the numbers above. It is off unless
+     * --smp names a conduit. See src/smp.c for what a zero here does and does
+     * not mean. */
+    if (smp_conduit) (void)emu_smp_run(smp_conduit, smp_mp, smp_sb);
+
+    /* A deliberately stalled run underruns on purpose; do not call that a
+     * failure of the image. */
+    emu_exit((g_ctx.stats.underruns && !stall_us) ? 1 : 0);
 }
 
 /* ------------------------------------------------------------ fatalities */
