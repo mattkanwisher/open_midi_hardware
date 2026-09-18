@@ -52,10 +52,17 @@ MIDI. Established 2026-09-18 by reading each project's own source;
 
 | | |
 |---|---|
-| **X68000** | **Use MAME** (`-exp1 x68k_midi`), **not px68k.** px68k emulates the CZ-6BM1 board, but its Win32 shim makes `midiOutOpen` return failure and `midiOutShortMsg`/`midiOutLongMsg` no-ops — so on Linux **it discards every MIDI byte**. Confirmed in `win32api/fake.c` |
+| **X68000** | **Use MAME** (`-exp1 x68k_midi`), **not px68k.** Note MAME **cannot record MIDI to a file** — `create_output()` calls PortMidi's `Pm_OpenOutput()`, a device stream, with no file path anywhere. So with MAME you must route to a real port and record *from that port* (`arecordmidi`/`aseqdump`). DOSBox captures to an SMF by itself, which is one moving part fewer. px68k emulates the CZ-6BM1 board, but its Win32 shim makes `midiOutOpen` return failure and `midiOutShortMsg`/`midiOutLongMsg` no-ops — so on Linux **it discards every MIDI byte**. Confirmed in `win32api/fake.c` |
 | **DOSBox Staging** | `mididevice = port` plus `midiconfig = <client:port>`. **Not `alsa`** — that value is deprecated and silently rewritten. It can also capture the stream to an SMF (Ctrl-Alt-F6), which is the cleanest feed into the A/B rig |
 | **DOSBox-X** | `mididevice = alsa` here — a different project with a different parser. It captures too, but the capture key is unbound by default |
 | **ScummVM** | `-e alsa` with `SCUMMVM_PORT=<client:port>` |
+
+**A capture host needs a real MIDI port.** MAME and PCem write to a device, not a
+file, so a machine with no ALSA sequencer cannot capture from them at all —
+verified the hard way: MAME 0.264 installed cleanly in this project's container
+and reports `open /dev/snd/seq failed … No MIDI ports were found`, and the
+kernel here has no sound support to add. Use a normal desktop Linux box, or use
+DOSBox's own capture.
 
 Capture the stream once, then render it offline with `desktop/ab.sh`. A live A/B
 is not repeatable — see `docs/PLAN.md` § 0.5.
