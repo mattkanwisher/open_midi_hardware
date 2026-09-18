@@ -49,6 +49,16 @@ struct mtp_engine {
     uint8_t  sysex[SYSEX_STORAGE];
     uint32_t sysex_used;
     uint32_t sysex_seen;
+    /* --- an independent judge of stream ordering -------------------------
+     * When this engine refuses a message it is owed that message back BEFORE
+     * anything else on the wire. `owed` records what was refused; anything
+     * that arrives before it is re-offered and accepted is the render loop
+     * reordering the stream, and is counted here. The engine is the right
+     * place for this check precisely because it is not the code under test. */
+    uint8_t  owed;            /* 0 none, 1 short, 2 sysex                   */
+    uint32_t owed_msg;
+    uint32_t owed_len;
+    uint32_t order_violations;
     char     lcd[21];
 };
 
@@ -80,7 +90,16 @@ static unsigned q_next(unsigned i) { return (i + 1u) % QUEUE_SIZE; }
 
 static mtp_status fake_short(mtp_engine *e, uint32_t msg, uint32_t ts)
 {
-    if (q_next(e->q_tail) == e->q_head) return MTP_ERR_AGAIN;
+    if (e->owed != 0u) {
+        /* Something was refused and has not come back yet. The only thing we
+         * should see is that same message. */
+        if (!(e->owed == 1u && e->owed_msg == msg)) e->order_violations++;
+    }
+    if (q_next(e->q_tail) == e->q_head) {
+        e->owed = 1u; e->owed_msg = msg;
+        return MTP_ERR_AGAIN;
+    }
+    if (e->owed == 1u && e->owed_msg == msg) e->owed = 0u;
     e->q[e->q_tail].t_samples = ts;
     e->q[e->q_tail].msg       = msg ? msg : 0xFFu;
     e->q[e->q_tail].sysex_len = 0;
@@ -91,12 +110,20 @@ static mtp_status fake_short(mtp_engine *e, uint32_t msg, uint32_t ts)
 static mtp_status fake_sysex(mtp_engine *e, const uint8_t *data, uint32_t len,
                              uint32_t ts)
 {
-    if (q_next(e->q_tail) == e->q_head) return MTP_ERR_AGAIN;
+    if (e->owed != 0u) {
+        if (!(e->owed == 2u && e->owed_len == len)) e->order_violations++;
+    }
+    if (q_next(e->q_tail) == e->q_head) {
+        e->owed = 2u; e->owed_len = len;
+        return MTP_ERR_AGAIN;
+    }
     if (e->sysex_used + len > SYSEX_STORAGE) {
         /* Mirrors mt32emu's behaviour when its preallocated sysex ring is
          * full: refuse rather than allocate. The render loop retries. */
+        e->owed = 2u; e->owed_len = len;
         return MTP_ERR_AGAIN;
     }
+    if (e->owed == 2u && e->owed_len == len) e->owed = 0u;
     memcpy(e->sysex + e->sysex_used, data, len);
     e->q[e->q_tail].t_samples = ts;
     e->q[e->q_tail].msg       = 0;
@@ -205,6 +232,11 @@ static void fake_render(mtp_engine *e, int16_t *stereo, uint32_t frames)
 static void fake_display(mtp_engine *e, char *dst21)
 {
     memcpy(dst21, e->lcd, 21);
+}
+
+uint32_t mtp_engine_fake_order_violations(mtp_engine *e)
+{
+    return e ? e->order_violations : 0u;
 }
 
 const mtp_engine_vtable mtp_engine_fake = {

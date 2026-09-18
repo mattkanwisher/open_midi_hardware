@@ -249,7 +249,9 @@ The governing rule:
 | **FAIL-5** | `machine = cm32l` but only MT-32 ROMs present | Fall back to MT-32 **with a warning**, do not fail | `[read]` |
 | **FAIL-6** | Underrun | Counted, logged, and the loop recovers — it MUST NOT drift permanently out of sync after one bad block | `[host]` `[qemu]` |
 | **FAIL-7** | MIDI byte lost to FIFO overrun | Counted. A silent drop is the one failure mode that makes a MIDI module feel haunted | `[read]` |
-| **FAIL-8** | Engine back-pressure on a **short message** | Currently counted and **dropped**, where a sysex is stashed and retried. A dropped All Notes Off is a note that hangs until power-cycle. Capacity is the engine queue depth per block period: **23× margin over DIN MIDI at queue 64, 369× at mt32emu's default 1024**, so it cannot occur on this product's wire — first loss measured at 700 000 baud | `[measured]` **`[open]`** — the asymmetry is now deliberate and documented, but not fixed; see `port/DESIGN.md` § 3.5 |
+| **FAIL-8** | Engine back-pressure on a **short message** | Held and re-offered before anything else, exactly as a sysex is. Nothing is dropped, so an All Notes Off cannot be lost. Capacity is the engine queue depth per block period: **23× margin over DIN MIDI at queue 64, 369× at mt32emu's default 1024** | **Fixed 2026-09-18** `[measured]` |
+| **FAIL-9** | Stream **order** under back-pressure | Messages MUST reach the engine in wire order even when it refuses one. The parser stops at the first refusal and reports bytes consumed; the render loop re-offers the refused message, then the unparsed bytes, then the wire | **Fixed 2026-09-18** `[measured]` — the old code produced **9 violations** on the standard bank-dump stream; it now produces 0, asserted by `port/host/test.sh` with the fake engine as an independent judge |
+| **FAIL-10** | Back-pressure on a **real-time byte** | Dropped, deliberately, and never stalls the stream. A real-time byte carries no stream position, and Active Sensing arrives every 300 ms for ever | `[read]` — intentional |
 
 ---
 
@@ -313,7 +315,7 @@ says every implementation of the seam must pass the same assertions on them.
 | **OBS-6** | MIDI FIFO overruns | |
 | **OBS-7** | `min_queued` — the lowest ring occupancy ever seen after a commit | **The margin, made visible.** Never below 1 means the loop never came within a block of an underrun. Touching 0 means you are one bad block from a click |
 | **OBS-8** | heap high water | RES-5 |
-| **OBS-12** | **Real-time bytes are invisible.** Active Sensing and MIDI Clock are forwarded to the engine but not counted in `short_msgs`, so they occupy queue slots no counter above the seam can see — and an MPU-401 sends Active Sensing every 300 ms forever | `[measured]` **`[open]`** |
+| **OBS-12** | **Real-time bytes are invisible to the counters.** Active Sensing and MIDI Clock are forwarded to the engine but not counted in `short_msgs`, so they occupy queue slots no counter above the seam can see — and an MPU-401 sends Active Sensing every 300 ms forever | `[measured]` **`[open]`** |
 
 | ID | Requirement | Evidence |
 |---|---|---|

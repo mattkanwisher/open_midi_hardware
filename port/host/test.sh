@@ -54,6 +54,17 @@ expect "bank underruns"    "^underruns"        0  b.txt
 grep -q "orphan data 0, sysex truncated 0, sysex aborted 0" b.txt \
   && echo "ok   bank parsed cleanly" || { echo "FAIL bank parse"; fail=1; }
 
+# The bank dump is big enough to fill the fake engine's sysex store, so this
+# run exercises the back-pressure path -- assert that it does, because "no
+# ordering violations" proves nothing about a path that was never taken.
+expect "bank back-pressure taken" "^engine back-pressure" 1 b.txt
+# ...and that nothing reached the engine out of order once it refused. The
+# fake engine judges this itself (DESIGN.md 3.5). Verified to have teeth: with
+# the parser allowed to keep emitting after a refusal, as it did before
+# 2026-09-18, this same stream produces 32 back-pressure events and 9
+# violations.
+expect "bank stream order kept"  "^order violations"    0 b.txt
+
 # --- 3. a stream that is wrong in three ways --------------------------------
 python3 - <<'PY'
 bad = bytearray([40,50,60])                                   # orphan data

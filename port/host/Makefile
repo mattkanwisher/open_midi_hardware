@@ -46,13 +46,16 @@ build/mtp_host: $(OBJ)
 
 VPATH := ../src
 
+# -MMD -MP: without header dependencies, editing a struct in ../include leaves
+# stale objects that disagree about its layout -- which does not fail to build,
+# it silently prints garbage counters. That cost real debugging time once.
 build/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(INC) -c -o $@ $<
+	$(CC) $(CFLAGS) $(INC) -MMD -MP -c -o $@ $<
 
 build/engine_mt32emu.o: engine_mt32emu.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(INC) -I$(MT32EMU_INC) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(INC) -I$(MT32EMU_INC) -MMD -MP -c -o $@ $<
 
 run: all
 	cd build && ./mtp_host --seconds 2
@@ -63,5 +66,7 @@ test: all
 
 clean:
 	rm -rf build
+
+-include $(OBJ:.o=.d)
 
 .PHONY: all run test clean

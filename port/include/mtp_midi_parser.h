@@ -46,8 +46,33 @@ typedef struct {
     uint32_t       sysex_len;
 } mtp_midi_msg;
 
-/* Called for each complete message, in stream order. */
-typedef void (*mtp_midi_sink)(const mtp_midi_msg *m, void *user);
+/* What a sink says back to the parser. */
+typedef enum {
+    MTP_SINK_CONTINUE = 0,  /* message accepted; keep parsing               */
+    MTP_SINK_STOP     = 1   /* message NOT accepted; stop parsing right here */
+} mtp_sink_result;
+
+/* Called for each complete message, in stream order.
+ *
+ * Returning MTP_SINK_STOP is the back-pressure path, and it exists because
+ * stream order is a correctness property, not a nicety. If a sink could only
+ * say "I refused that one" *after* the fact, the parser would already have
+ * delivered every later message in the same batch -- so a refused-and-retried
+ * sysex would be overtaken by the notes that followed it on the wire. A
+ * synthesiser that receives a patch dump after the notes it was meant to
+ * change plays the wrong sound, and nothing reports an error.
+ *
+ * On MTP_SINK_STOP the parser finishes its bookkeeping for the message it
+ * just emitted, stops, and returns the number of bytes it consumed. The
+ * caller is responsible for two things: holding the refused message and
+ * re-offering it before anything else, and re-feeding the unconsumed tail
+ * before reading any new bytes. mtp_render.c does both.
+ *
+ * A sink must NOT return MTP_SINK_STOP for MTP_MSG_REALTIME. Real-time bytes
+ * are single bytes that carry no stream position -- an MPU-401 emits Active
+ * Sensing every 300 ms forever -- so stalling the whole stream on one would
+ * be a self-inflicted deadlock. The parser ignores the result for them. */
+typedef mtp_sink_result (*mtp_midi_sink)(const mtp_midi_msg *m, void *user);
 
 typedef struct {
     uint8_t  *sysex_buf;
@@ -74,9 +99,16 @@ typedef struct {
 void mtp_midi_parser_init(mtp_midi_parser *p, uint8_t *sysex_buf,
                           uint32_t sysex_cap, mtp_midi_sink sink, void *user);
 
-/* Feeds n stamped bytes. Calls the sink zero or more times, synchronously. */
-void mtp_midi_parser_feed(mtp_midi_parser *p, const mtp_midi_byte *bytes,
-                          size_t n);
+/* Feeds n stamped bytes. Calls the sink zero or more times, synchronously.
+ *
+ * Returns the number of bytes CONSUMED, which is n unless a sink returned
+ * MTP_SINK_STOP -- in which case it is the index just past the byte that
+ * completed the refused message, and bytes[consumed..n) have not been looked
+ * at. Feed them again, in order, once the refused message has been accepted.
+ * The parser's own state is intact across the pause; it is a byte-stream
+ * machine and simply has not seen those bytes yet. */
+size_t mtp_midi_parser_feed(mtp_midi_parser *p, const mtp_midi_byte *bytes,
+                            size_t n);
 
 /* Length in bytes of a channel/system-common message with this status byte,
  * including the status byte. 0 for anything that is not one. */

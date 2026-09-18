@@ -67,6 +67,9 @@ typedef struct {
 
 /* Engines available in this build. */
 extern const mtp_engine_vtable mtp_engine_fake;     /* host/engine_fake.c    */
+/* Test hook, fake engine only: how many times a message reached the engine
+ * out of order after a refusal. Must be 0. See DESIGN.md 3.5. */
+uint32_t mtp_engine_fake_order_violations(mtp_engine *e);
 #ifdef MTP_WITH_MT32EMU
 extern const mtp_engine_vtable mtp_engine_mt32emu;  /* host/engine_mt32emu.cpp */
 #endif

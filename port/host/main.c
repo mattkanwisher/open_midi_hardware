@@ -192,6 +192,12 @@ int main(int argc, char **argv)
                ctx.parser.stat_dropped_data, ctx.parser.stat_sysex_truncated,
                ctx.parser.stat_sysex_aborted);
         printf("engine back-pressure %u\n", ctx.stats.engine_backpressure);
+        if (vt == &mtp_engine_fake) {
+            /* The fake engine watches whether anything reached it out of
+             * order after it refused a message. DESIGN.md 3.5. */
+            printf("order violations    %u\n",
+                   mtp_engine_fake_order_violations(inst));
+        }
         printf("underruns           %u\n", ctx.stats.underruns);
         printf("worst render        %u us  (block period %.0f us)\n",
                ctx.stats.worst_render_us,

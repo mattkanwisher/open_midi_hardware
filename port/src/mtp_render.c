@@ -9,8 +9,6 @@
 
 #include <string.h>
 
-#define MIDI_BATCH 64u
-
 /* ------------------------------------------------------------------ */
 /* MIDI -> engine                                                     */
 
@@ -27,7 +25,7 @@ static uint32_t engine_now_plus(mtp_render_ctx *ctx)
     }
 }
 
-static void on_message(const mtp_midi_msg *m, void *user)
+static mtp_sink_result on_message(const mtp_midi_msg *m, void *user)
 {
     mtp_render_ctx *ctx = (mtp_render_ctx *)user;
     uint32_t ts = engine_now_plus(ctx);
@@ -37,59 +35,117 @@ static void on_message(const mtp_midi_msg *m, void *user)
         /* Clock, start, stop, active sensing. The MT-32 ignores all of them
          * except that Active Sensing timeout is a real feature of hardware
          * units; we do not emulate it. Pass them through so the engine can
-         * count them, but do not let them occupy a queue slot on failure. */
-        ctx->engine->short_msg(ctx->inst, m->msg, ts);
+         * count them, but do not let them occupy a queue slot on failure --
+         * and never stall the stream on one. A refused real-time byte is
+         * dropped on purpose: it carries no stream position, and an MPU-401
+         * sends Active Sensing every 300 ms for ever. */
+        (void)ctx->engine->short_msg(ctx->inst, m->msg, ts);
         break;
 
     case MTP_MSG_SHORT:
         ctx->stats.short_msgs++;
-        if (ctx->engine->short_msg(ctx->inst, m->msg, ts) != MTP_OK)
+        if (ctx->engine->short_msg(ctx->inst, m->msg, ts) != MTP_OK) {
+            /* Hold it and stop. Dropping a short message is not the small
+             * loss it looks like: a lost note-on is a missing note, but a
+             * lost All Notes Off is a note that sounds until the box is
+             * power-cycled. */
             ctx->stats.engine_backpressure++;
+            ctx->retry_kind = MTP_RETRY_SHORT;
+            ctx->retry_msg  = m->msg;
+            ctx->retry_ts   = ts;
+            return MTP_SINK_STOP;
+        }
         break;
 
     case MTP_MSG_SYSEX:
         ctx->stats.sysex_msgs++;
         if (ctx->engine->sysex(ctx->inst, m->sysex, m->sysex_len, ts) != MTP_OK) {
-            /* The engine's sysex storage is full. Stash it and retry next
-             * block rather than dropping a patch dump on the floor. Only one
-             * slot: a second failure in the same window is a real overflow and
-             * is counted. */
+            /* The engine's sysex storage is full. Hold it and stop rather
+             * than dropping a patch dump on the floor. One slot is enough
+             * because stopping guarantees nothing else is emitted until this
+             * one is accepted. */
             ctx->stats.engine_backpressure++;
-            if (ctx->retry_len == 0u && m->sysex_len <= sizeof(ctx->retry_buf)) {
+            if (m->sysex_len <= sizeof(ctx->retry_buf)) {
                 memcpy(ctx->retry_buf, m->sysex, m->sysex_len);
-                ctx->retry_len = m->sysex_len;
-                ctx->retry_ts  = ts;
-            } else {
-                MTP_LOGW("sysex dropped (%u bytes)", (unsigned)m->sysex_len);
+                ctx->retry_len  = m->sysex_len;
+                ctx->retry_ts   = ts;
+                ctx->retry_kind = MTP_RETRY_SYSEX;
+                return MTP_SINK_STOP;
             }
+            /* Unreachable while retry_buf is MTP_SYSEX_MAX, which is also the
+             * parser's cap -- but a shrunken buffer must not corrupt memory. */
+            MTP_LOGW("sysex dropped (%u bytes)", (unsigned)m->sysex_len);
         }
         break;
     }
+    return MTP_SINK_CONTINUE;
+}
+
+/* Re-offer the one held message. True if the engine took it (or there was
+ * none), false if it is still refusing and we must not parse another byte. */
+static int retry_flush(mtp_render_ctx *ctx)
+{
+    mtp_status st;
+
+    if (ctx->retry_kind == MTP_RETRY_NONE) return 1;
+
+    if (ctx->retry_kind == MTP_RETRY_SHORT) {
+        st = ctx->engine->short_msg(ctx->inst, ctx->retry_msg, ctx->retry_ts);
+    } else {
+        st = ctx->engine->sysex(ctx->inst, ctx->retry_buf, ctx->retry_len,
+                                ctx->retry_ts);
+    }
+    if (st != MTP_OK) return 0;
+
+    ctx->retry_kind = MTP_RETRY_NONE;
+    ctx->retry_len  = 0;
+    return 1;
 }
 
 static void drain_midi(mtp_render_ctx *ctx)
 {
-    mtp_midi_byte batch[MIDI_BATCH];
-    size_t n;
+    mtp_midi_byte batch[MTP_MIDI_BATCH];
+    size_t n, used;
 
-    if (ctx->retry_len != 0u) {
-        if (ctx->engine->sysex(ctx->inst, ctx->retry_buf, ctx->retry_len,
-                               engine_now_plus(ctx)) == MTP_OK) {
-            ctx->retry_len = 0u;
-        } else {
-            /* Still full. Do not read more MIDI this round: back-pressure all
-             * the way to the UART FIFO is better than silently reordering. */
+    /* Order is the whole point of this function. Three sources of bytes, and
+     * they must be offered in exactly this sequence:
+     *
+     *   1. the message the engine refused last time,
+     *   2. the bytes that arrived after it and have never been parsed,
+     *   3. whatever is new on the wire.
+     *
+     * Getting this wrong does not fail loudly -- it silently reorders the
+     * stream, so a patch dump lands after the notes it was supposed to
+     * change. See DESIGN.md 3.5. */
+
+    if (!retry_flush(ctx)) return;          /* still refusing: parse nothing */
+
+    if (ctx->held_n != 0u) {
+        used = mtp_midi_parser_feed(&ctx->parser, ctx->held, ctx->held_n);
+        if (used < ctx->held_n) {
+            /* Stalled again inside the held bytes. Keep the remainder. */
+            memmove(ctx->held, ctx->held + used,
+                    (ctx->held_n - used) * sizeof(ctx->held[0]));
+            ctx->held_n -= (uint32_t)used;
             return;
         }
+        ctx->held_n = 0u;
     }
 
     for (;;) {
-        n = mtp_midi_read(batch, MIDI_BATCH);
+        n = mtp_midi_read(batch, MTP_MIDI_BATCH);
         if (n == 0u) break;
         ctx->stats.midi_bytes += (uint32_t)n;
-        mtp_midi_parser_feed(&ctx->parser, batch, n);
-        if (ctx->retry_len != 0u) break;   /* engine went full mid-batch */
-        if (n < MIDI_BATCH) break;
+        used = mtp_midi_parser_feed(&ctx->parser, batch, n);
+        if (used < n) {
+            /* The engine refused something mid-batch. Everything the parser
+             * has not seen waits here, in order, until it is accepted. */
+            ctx->held_n = (uint32_t)(n - used);
+            memcpy(ctx->held, batch + used,
+                   ctx->held_n * sizeof(ctx->held[0]));
+            return;
+        }
+        if (n < MTP_MIDI_BATCH) break;
     }
 }
 

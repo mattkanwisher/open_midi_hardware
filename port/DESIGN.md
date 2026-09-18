@@ -379,14 +379,24 @@ This is implemented and exercised: the bank-dump test provokes exactly one
 back-pressure event against the fake engine's deliberately small sysex store and
 recovers with zero drops.
 
-### 3.5 Two things about back-pressure that were not stated, and should have been
+### 3.5 Back-pressure: the asymmetry and the ordering hole, both now closed
 
-**(a) The asymmetry is real and has a bad failure mode.** A refused *sysex* is
-stashed and retried; a refused *short message* is counted and **dropped**
-(`mtp_render.c`, `MTP_MSG_SHORT`). Most dropped short messages are survivable —
-a lost note-on is a missing note. **A dropped All Notes Off is a note that hangs
-until the box is power-cycled**, which is the kind of fault users describe as
-the module being haunted.
+> **Fixed 2026-09-18.** Both problems below were real; both are closed, and the
+> parser contract changed to make the fix possible. What follows describes what
+> was wrong and what the code does now.
+
+**(a) The asymmetry was real and had a bad failure mode.** A refused *sysex* was
+stashed and retried; a refused *short message* was counted and **dropped**. Most
+dropped short messages are survivable — a lost note-on is a missing note.
+**A dropped All Notes Off is a note that hangs until the box is power-cycled**,
+which is the kind of fault users describe as the module being haunted.
+
+**Now:** a refused short message is held in the same one-slot retry as a sysex
+and re-offered before anything else. Nothing is dropped. The one deliberate
+exception is `MTP_MSG_REALTIME`, which is still dropped on refusal and must
+never stall the stream: a real-time byte carries no stream position, and an
+MPU-401 emits Active Sensing every 300 ms for ever, so stalling on one would be
+a self-inflicted deadlock.
 
 Measured capacity (`emu/`, a 1664-message panic storm) is **engine queue depth
 per block period**:
@@ -407,28 +417,54 @@ has. That is why it is documented here rather than fixed in a hurry: the fix is
 a second retry slot, and the *ordering* problem in (b) has to be settled first
 or the fix makes things worse.
 
-**(b) The existing sysex retry has an ordering hole.** `drain_midi()` reads a
-64-byte batch and calls `mtp_midi_parser_feed()`, which emits **every complete
-message in that batch** through the callback before returning. The
-`if (ctx->retry_len != 0u) break;` that stops the draining is checked only
-*after* the whole batch has been fed. So when the engine refuses a sysex
-mid-batch, the messages that follow it in the same 64 bytes are still handed to
-the engine — **ahead of the sysex that was stashed**. Up to about twenty short
-messages can overtake a stashed patch dump.
+**(b) The sysex retry had an ordering hole, and it was not theoretical.**
+`drain_midi()` read a 64-byte batch and called `mtp_midi_parser_feed()`, which
+emitted **every complete message in that batch** before returning. The check
+that stopped the draining happened only *after* the whole batch was fed. So
+when the engine refused a sysex mid-batch, the messages that followed it in the
+same 64 bytes still reached the engine — **ahead of the sysex that was
+stashed**. A synthesiser that receives a patch dump after the notes it was
+meant to change plays the wrong sound, and nothing reports an error.
 
-The window is small and needs an engine that refuses in the first place, so
-nothing observed has tripped it. But `§ 3.4`'s claim that back-pressure
-"propagates to the UART FIFO rather than a patch dump being silently lost" is
-true of the *dump* and not of its *position in the stream*. Closing it properly
-means letting the parser callback signal "stop", which changes
-`mtp_midi_parser.h`'s contract and therefore every implementation of the seam —
-a deliberate change, not a quick one. **Open; see the top of this section.**
+Measured, on the existing 16 kB bank-dump test stream: **9 ordering violations**
+and 32 back-pressure events. Not a corner case.
 
-**(c) Real-time bytes are invisible to the counters.** `MTP_MSG_REALTIME` is
-forwarded to `engine->short_msg()` but not counted in `stats.short_msgs`, so
+**The fix, and why it needed the contract to change.** A sink that can only say
+"I refused that" *after* the fact is too late — the parser has already moved on.
+So `mtp_midi_sink` now returns `mtp_sink_result`, and `MTP_SINK_STOP` makes
+`mtp_midi_parser_feed()` stop immediately and return **the number of bytes it
+consumed**. Everything it has not looked at is untouched, and the parser's own
+state is intact across the pause, because it is a byte-stream machine that has
+simply not seen those bytes yet.
+
+`drain_midi()` then offers three sources strictly in order:
+
+1. the message the engine refused last time,
+2. the bytes that arrived after it and have never been parsed (`ctx->held`),
+3. whatever is new on the wire.
+
+Because the parser stops at the first refusal, **at most one message is ever
+outstanding**, which is why one retry slot is sufficient rather than merely
+convenient.
+
+After the fix the same stream produces **0 violations and 1 back-pressure
+event** — the count falls because stopping and retrying beats hammering a full
+engine 32 times.
+
+**How it is kept fixed.** The check lives in `host/engine_fake.c`, not in the
+render loop: the engine records what it refused and counts anything that
+arrives before that message comes back. The judge is deliberately not the code
+under test. `host/test.sh` asserts both `order violations = 0` **and**
+`engine back-pressure = 1`, because zero violations on a path that was never
+taken would prove nothing.
+
+**(c) Real-time bytes are still invisible to the counters.** `MTP_MSG_REALTIME`
+is forwarded to `engine->short_msg()` but not counted in `stats.short_msgs`, so
 Active Sensing and MIDI Clock occupy engine queue slots that no counter above
 the seam can see. Since a PC's MPU-401 emits Active Sensing every 300 ms
-forever, that is a permanent invisible load.
+forever, that is a permanent invisible load. **Still open** — fixing it changes
+the counter contract that all five implementations assert against, so it wants
+doing deliberately and in one go.
 
 ---
 

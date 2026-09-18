@@ -32,8 +32,9 @@ void mtp_midi_parser_init(mtp_midi_parser *p, uint8_t *sysex_buf,
     p->user      = user;
 }
 
-static void emit_short(mtp_midi_parser *p)
+static mtp_sink_result emit_short(mtp_midi_parser *p)
 {
+    mtp_sink_result r = MTP_SINK_CONTINUE;
     mtp_midi_msg m;
     m.kind      = MTP_MSG_SHORT;
     m.t_us      = p->t_us;
@@ -43,13 +44,20 @@ static void emit_short(mtp_midi_parser *p)
     m.sysex     = NULL;
     m.sysex_len = 0;
     p->stat_short++;
-    if (p->sink) p->sink(&m, p->user);
-    /* Running status survives: the next data byte reuses pending[0]. */
+    if (p->sink) r = p->sink(&m, p->user);
+    /* Running status survives: the next data byte reuses pending[0]. This
+     * bookkeeping happens even when the sink stopped -- the message WAS
+     * parsed, it just was not accepted, and the caller re-offers it rather
+     * than the parser re-parsing it. */
     p->pending_len = 1;
+    return r;
 }
 
 static void emit_realtime(mtp_midi_parser *p, uint8_t b)
 {
+    /* Deliberately discards the sink's result: see mtp_midi_parser.h. A
+     * real-time byte carries no stream position, so stalling on one would
+     * deadlock a stream that gets Active Sensing every 300 ms. */
     mtp_midi_msg m;
     m.kind      = MTP_MSG_REALTIME;
     m.t_us      = p->t_us;
@@ -60,9 +68,10 @@ static void emit_realtime(mtp_midi_parser *p, uint8_t b)
     if (p->sink) p->sink(&m, p->user);
 }
 
-static void emit_sysex(mtp_midi_parser *p)
+static mtp_sink_result emit_sysex(mtp_midi_parser *p)
 {
     mtp_midi_msg m;
+    mtp_sink_result r = MTP_SINK_CONTINUE;
     if (p->sysex_overflow) {
         /* We never saw the whole thing, so we must not hand a half message to
          * a synth that will checksum it. Count it and move on. */
@@ -74,11 +83,12 @@ static void emit_sysex(mtp_midi_parser *p)
         m.sysex     = p->sysex_buf;
         m.sysex_len = p->sysex_len;
         p->stat_sysex++;
-        if (p->sink) p->sink(&m, p->user);
+        if (p->sink) r = p->sink(&m, p->user);
     }
     p->in_sysex       = 0;
     p->sysex_len      = 0;
     p->sysex_overflow = 0;
+    return r;
 }
 
 static void sysex_push(mtp_midi_parser *p, uint8_t b)
@@ -90,8 +100,8 @@ static void sysex_push(mtp_midi_parser *p, uint8_t b)
     }
 }
 
-void mtp_midi_parser_feed(mtp_midi_parser *p, const mtp_midi_byte *bytes,
-                          size_t n)
+size_t mtp_midi_parser_feed(mtp_midi_parser *p, const mtp_midi_byte *bytes,
+                            size_t n)
 {
     size_t i;
     for (i = 0; i < n; i++) {
@@ -110,7 +120,7 @@ void mtp_midi_parser_feed(mtp_midi_parser *p, const mtp_midi_byte *bytes,
             if (p->in_sysex) {
                 if (b == 0xF7u) {          /* proper end of exclusive */
                     sysex_push(p, b);
-                    emit_sysex(p);
+                    if (emit_sysex(p) == MTP_SINK_STOP) return i + 1u;
                     continue;
                 }
                 /* Any other status aborts the sysex. Real devices do this and
@@ -145,8 +155,9 @@ void mtp_midi_parser_feed(mtp_midi_parser *p, const mtp_midi_byte *bytes,
             if (p->pending_need == 0u) {   /* 0xF4/0xF5: undefined, ignore */
                 p->pending_len = 0;
             } else if (p->pending_need == 1u) {   /* e.g. tune request */
-                emit_short(p);
+                mtp_sink_result r = emit_short(p);
                 p->pending_len = 0;
+                if (r == MTP_SINK_STOP) return i + 1u;
             }
             continue;
         }
@@ -171,10 +182,12 @@ void mtp_midi_parser_feed(mtp_midi_parser *p, const mtp_midi_byte *bytes,
         p->pending_len++;
 
         if (p->pending_len >= p->pending_need) {
-            emit_short(p);
+            mtp_sink_result r = emit_short(p);
             /* emit_short leaves pending_len == 1 so running status continues.
              * For system common there is no running status, so clear. */
             if (p->pending[0] >= 0xF0u) p->pending_len = 0;
+            if (r == MTP_SINK_STOP) return i + 1u;
         }
     }
+    return n;
 }

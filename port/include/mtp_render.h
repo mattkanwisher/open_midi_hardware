@@ -11,6 +11,16 @@
 extern "C" {
 #endif
 
+/* How many stamped bytes one wire read takes at most. The held[] buffer above
+ * is this size because the parser can stop after the first byte of a batch. */
+#define MTP_MIDI_BATCH 64u
+
+enum {
+    MTP_RETRY_NONE  = 0,
+    MTP_RETRY_SHORT = 1,
+    MTP_RETRY_SYSEX = 2
+};
+
 typedef struct {
     uint32_t blocks;              /* audio blocks committed                */
     uint32_t underruns;           /* from the audio sink                   */
@@ -36,10 +46,24 @@ typedef struct {
     uint32_t                 lookahead_frames;
     mtp_midi_parser          parser;
     uint8_t                  sysex_buf[MTP_SYSEX_MAX];
-    /* staging for a sysex the engine refused: retried next block */
-    uint8_t                  retry_buf[MTP_SYSEX_MAX];
+
+    /* --- back-pressure, and why it takes three fields ---------------------
+     *
+     * When the engine refuses a message the parser stops immediately
+     * (MTP_SINK_STOP), so at most ONE message is ever outstanding. Holding it
+     * is not enough on its own: the bytes that came after it in the same read
+     * must also wait, or they would overtake it. So we hold both, and offer
+     * them back in order before reading anything new. */
+    uint8_t                  retry_kind;   /* MTP_RETRY_*                    */
+    uint32_t                 retry_msg;    /* MTP_RETRY_SHORT                */
+    uint8_t                  retry_buf[MTP_SYSEX_MAX];  /* MTP_RETRY_SYSEX   */
     uint32_t                 retry_len;
     uint32_t                 retry_ts;
+    /* Bytes read from the wire that the parser has not looked at yet,
+     * because it stopped mid-batch. Never more than one batch. */
+    mtp_midi_byte            held[MTP_MIDI_BATCH];
+    uint32_t                 held_n;
+
     mtp_render_stats         stats;
 } mtp_render_ctx;
 
