@@ -74,8 +74,8 @@ Two intended physical shapes, sharing one firmware:
 | | **Standalone** | **Daughterboard** |
 |---|---|---|
 | Form | A box | WaveBlaster-format card on a host sound card |
-| MIDI in | DIN-5, opto-isolated | 3.3 V TTL from the host card's MPU-401 decode |
-| Audio out | Line-level jacks | Analogue pins into the host card's mixer |
+| MIDI in | DIN-5, opto-isolated | **5 V** TTL on WaveBlaster pin 4, level-shifted. (A *direct* FPGA link, bypassing the header, is 3.3 V — two different front ends, `hw/CARRIER.md` § 7.4) |
+| Audio out | Line-level jacks | Analogue pins into the host card's mixer, attenuated 6 dB |
 | Power | Its own supply | From the host connector — a hard constraint, see `hw/` |
 
 The firmware difference between them is the MIDI front end and the output
@@ -92,7 +92,8 @@ a project-level decision, not a feature request.
 | **NG-2. No General MIDI in v1** | FluidSynth and a SoundFont are a second synth and a second memory problem. The RAM is specified for it (§ 7) but the firmware does not do it yet |
 | **NG-3. No network, no FTP** | mt32-pi has these. They are why mt32-pi needs USB and a network stack |
 | **NG-4. No display, no buttons, no encoder in v1** | `port/DESIGN.md` § 5 keeps them out of the platform interface on purpose: an abstraction for a feature that does not exist is how a 40-function interface becomes a 200-function one nobody can port. § 6.3 names the display as the trigger for adopting an RTOS, when it comes |
-| **NG-5. No MIDI OUT** | Not in the interface. MIDI THRU, if it exists, is a hardware question — `hw/` |
+| **NG-5. No MIDI OUT** | Not in the interface, and nothing above the seam can produce one |
+| **NG-6. MIDI THRU: yes on the standalone box, no on the card** | Decided 2026-09-18. THRU is pure hardware — it never enters the firmware — and costs ≈ $0.46. It is worth having here specifically *because* of the H11L1: a Schmitt-output opto adds ~0.4 % of a bit time per hop where a 6N138 design adds microseconds, so this box can be daisy-chained with a clear conscience. The card has no DIN to THRU to. `hw/CARRIER.md` § 5 |
 
 ---
 
@@ -111,7 +112,7 @@ a project-level decision, not a feature request.
 
 | ID | Requirement | Evidence |
 |---|---|---|
-| **OUT-1** | Stereo, **48 kHz**, 16-bit, via I²S to a PCM5102A, DC-blocked, at line level | `[read]` `port/DESIGN.md` § 2.1 |
+| **OUT-1** | Stereo, **48 kHz**, 16-bit, via I²S to a PCM5102A, at line level. The PCM5102A's DirectPath output is **ground-centred and needs no DC-blocking capacitor** — fitting one would require a bipolar part at ±3 V and would add distortion for nothing. Keep the footprint, populate it with 0 Ω | `[read]` `hw/CARRIER.md` § 6.3. **Corrected 2026-09-18**; this table and `docs/PLAN.md` § 1 both said "DC-blocked" and both were wrong |
 | **OUT-2** | 48 kHz is produced by `mt32emu` **directly**, using `AnalogOutputMode_ACCURATE`, which upsamples inside the emulated analogue stage. **There MUST be no sample-rate converter anywhere in the system** | `[read]` `Synth.cpp:294-298` |
 | **OUT-3** | Fallback configuration, if the real-time factor demands it: `AnalogOutputMode_COARSE` at 32 kHz, with I²S at 32 kHz. Note this fallback *also* requires no resampler | `[read]` |
 | **OUT-4** | The I²S output **MUST run continuously from boot**, at the configured rate, in every state including every failure state | `[read]` `port/DESIGN.md` § 4.3 |
@@ -138,6 +139,22 @@ a project-level decision, not a feature request.
 |---|---|---|
 | **BM-1** | The SoC BROM tries **SD, then SPI, then FEL**. Because FEL is last and always available over USB, boot flash is optional and **the board cannot be bricked by a bad image** | `[read]` `boot/BRINGUP.md` |
 | **BM-2** | The USB port is for FEL recovery and development only. It is **not** a MIDI port and never will be — see NG-1 | `[read]` |
+
+### 2.6 Host reset — daughterboard only
+
+WaveBlaster pin 26 is an active-low reset, and every reachable daughterboard
+design ties it to its synth chip's reset. A DB50XG-class synth is making sound
+again milliseconds after the line is released.
+
+**This device cannot do that, and must not pretend to.** It is a SoC that boots
+a bootloader, initialises DDR3, reads an SD card, SHA-1s a ROM and opens a
+synth. That is seconds, not milliseconds.
+
+| ID | Requirement | Evidence |
+|---|---|---|
+| **RST-1** | Pin 26 **MUST NOT** be wired to the SoM's reset. A host that pulses it during a DOS game's initialisation would take the module off the air for the length of a full boot | `[inferred]` `hw/CARRIER.md` § 1.3 |
+| **RST-2** | Pin 26 is brought in level-shifted as a **GPIO input**, and firmware decides what it means. The sane reading is "the host says reinitialise": reset the synth's MIDI state, not the SoC | `[open]` — the firmware behaviour is proposed, not implemented |
+| **RST-3** | The seconds-to-first-sound behaviour is **observable product behaviour** and MUST be stated in the product description. A module that behaves differently from a DB50XG here will otherwise be reported as broken | `[inferred]` |
 
 ---
 

@@ -43,3 +43,63 @@ MISC,Misc,ESD diodes / reset button / strap jumpers / test points,,,,,0.60,GUESS
 # the inverse of the PCB permutation, so the net assignment is a schematic decision
 # and a wrong one is a respin. DQ bit swapping WITHIN a byte lane is permitted and
 # encouraged; DQ swapping between lanes is not, and DQS/DM stay with their lane.
+#
+# ============================================================================
+# CARRIER-BOARD DELTA, added 2026-09-18. See hw/CARRIER.md.
+# These are the parts the carrier needs that the test board above did not cost.
+# They are the SoM-independent half of the design: MIDI in, MIDI THRU, the
+# WaveBlaster interface, the output stage, and the input-power front end.
+# NO LCSC code is given where I could not read one - LCSC is unreachable from
+# the authoring environment and this project does not invent part numbers.
+# Every unit price below is GUESS for the same reason; the whole block is under
+# $2, so the bottom line is not sensitive to it.
+# confidence: V = vendor/reseller listing, I = engineering judgement,
+#             GUESS = invented placeholder, C-A = value taken from a community
+#                     artefact (an open-hardware netlist) read directly
+# ----------------------------------------------------------------------------
+ref,function,part,lcsc,package,qty,unit_usd,ext_usd,confidence,note
+# --- MIDI IN, standalone build (CARRIER.md section 4) ---
+U1,MIDI optocoupler,H11L1S(TA) Everlight,C78589,SMD-6,1,0.1563,0.16,V,already above as U4; pinout 1=A 2=K 3=NC 4=VO 5=GND 6=VCC per CARRIER.md 1.4
+R1,MIDI loop resistor,220R 1% 0402,,0402,1,0.005,0.01,GUESS,MIDI 1.0 spec value; gives 5.00 mA with a 5 V sender - CARRIER.md 4.3
+D1,MIDI LED protection,1N4148W,,SOD-123,1,0.01,0.01,GUESS,reverse-parallel across the IRED
+R3,Opto output pull-up,1k 0402,,0402,1,0.005,0.01,I,1k chosen in CARRIER.md 4.4: 33 ns edge / 3.3 mA. NOT 4k7
+C1,Opto VCC decoupling,100nF 0402 X7R,,0402,1,0.004,0.00,GUESS,
+J3,MIDI IN jack,DIN-5 180deg PCB,,THT,1,0.40,0.40,GUESS,already above as J3
+R4,MIDI link + test point,0R 0402,,0402,1,0.004,0.00,I,bench TTL injection point; exactly one of R4/R13 populated
+# --- MIDI THRU, standalone build (CARRIER.md section 5) ---
+U2,THRU buffer,74LVC1G07 NON-inverting open-drain,,SOT-23-5,1,0.05,0.05,GUESS,VCC 3.3 V; open-drain output tolerant to 5.5 V; NOT the inverting 1G06 - CARRIER.md 5.2
+R5-R6,THRU loop resistors,220R 1% 0402,,0402,2,0.005,0.01,GUESS,
+J6,MIDI THRU jack,DIN-5 180deg PCB,,THT,1,0.40,0.40,GUESS,THRU decided YES for the box - CARRIER.md 5.1. Total THRU cost ~$0.46
+# --- WaveBlaster interface, daughterboard build (CARRIER.md section 7) ---
+J7,WaveBlaster header,2x13 2.54mm header or IDC,,THT,1,0.20,0.20,GUESS,pinout from 3 fabricated open designs - CARRIER.md 7.2
+Q2,MIDI level shifter,BSS138 logic-level N-FET,,SOT-23,1,0.02,0.02,GUESS,AN97055 topology; works for a push-pull OR open-drain host - CARRIER.md 7.4
+R11-R12,Level-shifter pull-ups,10k 0402,,0402,2,0.005,0.01,C-A,10k/10k as ivop/vs1053-waveblaster does it
+R13,MIDI link + test point,0R 0402,,0402,1,0.004,0.00,I,
+Q3,Reset level shifter,BSS138,,SOT-23,1,0.02,0.02,I,WB pin 26 to a GPIO - NOT to SoM RESETn. CARRIER.md 1.3
+R14-R15,Reset shifter pull-ups,10k 0402,,0402,2,0.005,0.01,I,
+R16,Ground join,0R 0603,,0603,1,0.004,0.00,C-A,single 0R link between GND and AGND pours; both reference boards do this
+# --- Analogue output (CARRIER.md section 6) ---
+R7-R8,WB attenuator,4k7 1% 0402,,0402,4,0.005,0.02,I,-6.02 dB; Zout 2350R; DAC load 9.4k. Re-stuffable - CARRIER.md 6.2
+C4,WB output RC,680pF C0G 0402,,0402,2,0.01,0.02,I,fc 99.6 kHz; -0.17 dB at 20 kHz
+R9,WB series/DC-block link,33R 0402,,0402,2,0.005,0.01,I,sits where a DC-block cap would go; default populated with 33R
+C7,DC block (DNP),4.7uF bipolar,,0805,0,0.05,0.00,I,DNP. PCM5102A is ground-centred and needs none. 3.6 Hz corner if fitted
+R10,Line-out series,100R 0402,,0402,2,0.005,0.01,I,standalone build only
+C6,Line-out RC,2n2 C0G 0402,,0402,2,0.01,0.02,I,723 kHz; -0.003 dB at 20 kHz
+RSTRAP,DAC strap resistors,10k 0402,,0402,8,0.005,0.04,I,FLT/DEMP/FMT/XSMT - BOTH pull-up and pull-down footprints, one populated
+# --- Input power front end (CARRIER.md section 9) ---
+U11,Load switch,slew-rate-controlled load switch,,SOT-23-5/6,1,0.15,0.15,GUESS,MANDATORY on the card build. >=5 ms slew caps inrush at 100 mA - CARRIER.md 9.4
+C_BULK,Bulk capacitance,100uF 6.3V,,1206/tantalum,1,0.10,0.10,GUESS,downstream of the load switch so the switch controls its charging
+D2,USB VBUS OR-ing,Schottky or ideal-diode controller,,SOD-123 / SOT-23,1,0.05,0.05,GUESS,host 5 V must never back-drive a PC USB port - CARRIER.md 9.5
+F1,USB VBUS fuse,resettable fuse 1A,,1206,1,0.05,0.05,GUESS,
+U12,Carrier 3.3V buck,SY8089AAAC,C78988,SOT-23-5,1,0.0776,0.08,V,enabled BY the SoM's 3V3 output rather than supplied by it - CARRIER.md 2.8
+ESD1,ESD protection,ESD arrays: USB-C / SD / DIN / audio jack,,,4,0.05,0.20,GUESS,USB pair needs <=1 pF
+,,,,,,CARRIER DELTA TOTAL,~2.06,,excludes the SoM itself and the parts already listed above
+# ----------------------------------------------------------------------------
+# NOT on the carrier, by design: DDR3 (it is on the module), VTT, VREF divider,
+# impedance control, controlled-length routing, PMIC, boot-select strap,
+# on-board USB-UART, USB host, eMMC, Ethernet, display, Wi-Fi.
+# The carrier can be a 4-layer board with no impedance control - CARRIER.md 2.11.
+# POWER BUDGET (CARRIER.md section 9): steady 1.66 W / 333 mA at 5 V; startup
+# 3.86 W / 773 mA. The only proven WaveBlaster-header envelope is the Yamaha
+# DB50XG's 2 W, so steady-state fits with 0.34 W to spare and the STARTUP
+# TRANSIENT is the thing that needs engineering, not the steady state.

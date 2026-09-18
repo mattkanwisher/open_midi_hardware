@@ -7,6 +7,15 @@ This document answers six questions: what the part is, what reference designs
 exist to copy, what the minimum BOM is, what the board realities are, what it
 costs, and whether we should be doing this at all versus buying a module.
 
+**Its answer to the sixth is: buy a vendor SoM.** Everything downstream of that
+decision — what the carrier board has to be, and the parts of it that do not
+depend on the SoM's pinout — is in **[`hw/CARRIER.md`](CARRIER.md)**, added
+2026-09-18. In particular `CARRIER.md` § 3 is the single table of facts that
+must be read off a vendor document before any copper is drawn, and §§ 4–9 are
+the MIDI front end, the analogue output stage, the WaveBlaster connector and the
+power budget, finished at component level. Four claims in *this* document are
+corrected there; they are listed in `CARRIER.md` § 11 and applied below.
+
 ## 0. Read this first: what could not be verified, and why
 
 The egress proxy in this environment blocks almost every vendor and wiki domain.
@@ -299,7 +308,19 @@ The through-hole `H11L1` (C78588, $0.161) would be a hand-solder step. On
 onsemi, the SMD equivalent is `H11L1SM` (C899473).
 
 Circuit: DIN pin 4 → 220 Ω → anode; DIN pin 5 → cathode; 1N4148 reverse across
-the LED; output pin 6 with 4.7 kΩ pull-up to 3.3 V, straight to a T113 UART RX.
+the LED; **the output is pin 4** (pin 5 is GND, pin 6 is VCC) with a **1 kΩ**
+pull-up to 3.3 V, straight to a T113 UART RX.
+
+> **Corrected 2026-09-18.** This paragraph previously said "output pin 6 with
+> 4.7 kΩ pull-up", which is wrong twice over: pin 6 is VCC, and 4.7 kΩ gives
+> away five times the edge time for no reason. Two artefacts read directly —
+> KiCad's `Isolator:H11L1` symbol and the routed PCB netlist of
+> `nikitalita/waveblaster-to-midi-module-adapter` — both give **1 = anode,
+> 2 = cathode, 3 = NC, 4 = output (inverted), 5 = GND, 6 = VCC** `[C-A]`. The
+> full circuit, the 5 mA loop arithmetic and the rise/fall budget at 31 250 baud
+> are in [`CARRIER.md` § 4](CARRIER.md). The pin numbering is still a community
+> artefact and not a datasheet read, so it remains a row in `CARRIER.md` § 3.
+
 **[I]** Put a 0 Ω/jumper and a test point between the opto and the SoC so the
 MIDI input can be driven from a TTL source during bring-up without a DIN cable —
 that is how the FPGA-fed variant in the parent plan will feed it anyway.
@@ -336,7 +357,10 @@ bootstrap straps needed.
 - **No on-chip codec used for line out.** The T113-i *has* an integrated
   ADC/DAC codec [DS-derived brief], which could in principle delete the PCM5102A.
   **[I]** Keep the PCM5102A: it is $0.84, it needs no MCLK (internal PLL, three
-  wires: BCK/LRCK/DIN), its output stage is designed for 2 Vrms line level, and
+  wires: BCK/LRCK/DIN), its **ground-centred "DirectPath" output stage delivers
+  2.1 Vrms and needs no DC-blocking capacitor at all** ([`CARRIER.md`
+  § 6](CARRIER.md) — this corrects "DC-blocked" in `docs/PLAN.md` § 1 and
+  `docs/BOARD_SPEC.md` OUT-1), and
   the I2S path is the one we actually want to prove because that is what a
   production module would use. Route the on-chip codec to a test point if the
   pins are free, and treat it as a fallback.
@@ -770,11 +794,24 @@ carrier schematic, a proven audio path, a known-good U-Boot with real DRAM
 parameters, and — crucially — we will have had the Allwinner EVB schematic and
 design guide in hand long enough to copy them properly.
 
-The one thing that would change my mind: if the SoM's 37 × 39 mm footprint plus
+~~The one thing that would change my mind: if the SoM's 37 × 39 mm footprint plus
 connectors cannot be made to fit the WaveBlaster form factor (~63 × 38 mm) that
-§ 5 of the parent plan cares about. Check that against the actual module
-drawing before committing — but note it does not affect the *test* board, which
-has no form-factor constraint at all.
+§ 5 of the parent plan cares about.~~
+
+**Retired, 2026-09-18 — there is no ~63 × 38 mm WaveBlaster form factor.** No
+outline specification for a WaveBlaster daughterboard exists in any reachable
+source. Shipped boards range from the **DreamBlaster S2 at 24 × 34 mm** and the
+**X2 at 65 × 38 mm** `[C]` — which is where the 63 × 38 figure came from, and it
+is one modern miniature board, not a limit — up to the **Yamaha DB50XG at
+139 × 89 × 15 mm** `[DS-X, Yamaha owner's manual]`. A 37 × 39 mm module plus a
+2×13 header is comfortably smaller than the board every WaveBlaster host was
+built to accept. The real constraint is mechanical clearance above a particular
+card in a particular case, which is a fit check and not a specification.
+See [`CARRIER.md` § 1.2](CARRIER.md).
+
+**So the SoM recommendation now has no stated blocker left.** What it has
+instead is a list of vendor facts that must be read before copper:
+[`CARRIER.md` § 3](CARRIER.md).
 
 ---
 
@@ -813,6 +850,28 @@ has no form-factor constraint at all.
 Items 2, 4 and 5 are the ones that gate copper. Items 1 and 7 unblock all three,
 and neither needs a decision from anyone — they need a person on an open network
 and a purchase order.
+
+**Added 2026-09-18, for the SoM-on-a-carrier route specifically:**
+
+9. **Fetch the SoM's own documents** — the Forlinx *FET113i-S Hardware Manual*
+   or the MYIR *MYC-YT113i* pack — and fill in
+   [`CARRIER.md` § 3](CARRIER.md) rows 1–7. That is the pin-mux table, the
+   connector drawing, the power-up sequence and the reset structure. **These
+   arrive in the same box as the dev board of item 7**, so item 7 unblocks them
+   too. This is now the *first* gate on the carrier, ahead of items 1–4, which
+   only gate the bare-BGA route.
+10. **Fetch the PCM5102A and H11L1 datasheets** — `CARRIER.md` § 3 rows 8–17,
+    and § 10 lists the exact URLs that were tried and blocked. Nine of the
+    twenty-two unknowns are two PDFs.
+11. **Measure, on a real host card:** what the WaveBlaster mixer input wants
+    (§ 3 row 20), what the header's +5 V will actually deliver (row 19), and
+    whether pin 4 is push-pull or open-drain (row 18). Three scope traces. No
+    document anywhere answers them.
+
+Rows 21 and 22 of that table are `hw/HARDWARE.md` §§ 1.4, 5.3 and 5.4 — the ball
+pitch, the DDR3 rules and the AC remapping efuse. **The SoM route defers them,
+it does not resolve them**, and they return in full the day anybody lays out the
+bare BGA.
 
 ## 8. Sources
 
@@ -884,6 +943,15 @@ Software / bring-up context:
 - Sourcing legacy DDR2/DDR3 in 2026 — https://suntsu.com/blog/sourcing-legacy-ddr2-ddr3-memory-in-2026-supply-technical-guide/
 - DDR4 prices over 50 % in Q3 2026, DDR3 impacted — https://wccftech.com/memory-shortages-drive-ddr4-prices-over-50-in-q3-2026-ddr3-also-impacted-by-higher-costs/
 - DRAM and NAND prices jump as suppliers tighten — https://www.astutegroup.com/news/memory-shortages/dram-and-nand-prices-jump-as-samsung-sk-hynix-and-micron-tighten-supply/
+
+Carrier-board sources (added 2026-09-18; the full list, including everything
+blocked, is in [`CARRIER.md` § 10](CARRIER.md)). These four **were reachable and
+were cloned and parsed directly** — they are the evidence behind the WaveBlaster
+pinout, the H11L1 pin numbering and the PCM5102A pin table:
+- `nikitalita/waveblaster-to-midi-module-adapter` — https://github.com/nikitalita/Waveblaster-to-midi-module-adapter
+- `ivop/vs1053-waveblaster` — https://github.com/ivop/vs1053-waveblaster
+- `ivop/cs9236-waveblaster` — https://github.com/ivop/cs9236-waveblaster
+- `KiCad/kicad-symbols`, `Audio.lib` — https://github.com/KiCad/kicad-symbols
 
 MIDI optocoupler:
 - Hackaday, optocouplers for MIDI — https://hackaday.com/2018/05/09/optocouplers-defending-your-microcontroller-midi-and-a-hot-tip-for-speed/

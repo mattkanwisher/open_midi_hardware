@@ -39,7 +39,8 @@ remapping question — one `xfel read32 0x03006228` on arrival.
 | Item | Why | Est. |
 |---|---|---|
 | PCM5102A module (or the bare IC, C107671) | I²S DAC, the output path | $2–4 |
-| H11L1S optocoupler (C78589) ×2 | MIDI in. Schmitt output, in spec at 3.3 V | $0.50 |
+| H11L1S optocoupler (C78589) ×2 | MIDI in. Schmitt output, in spec at 3.3 V. **Note the output is pin 4, not pin 6** — `hw/HARDWARE.md` § 3.3 said pin 6 and was wrong | $0.50 |
+| BSS138 ×2, and a 74LVC1G07 (non-inverting open-drain — **not** the 1G06) | The daughterboard's 5 V→3.3 V MIDI shifter and the THRU driver. Lets both front ends be breadboarded before a carrier exists | $0.30 |
 | MIDI DIN breakout or a game-port MIDI cable | Feed it from a real DOS machine | $10 |
 
 ## 4. Not purchasable
@@ -57,3 +58,7 @@ enter this repository.
    at performance, at 32 kHz and again at 48 kHz.
 3. The four hardware PDFs (`hw/HARDWARE.md` § 7 items 1 and 7) from a network
    that can reach whycan, 100ask and Forlinx — this session cannot.
+4. **Read the SoM's hardware manual into `hw/ref/`** — specifically its pin-mux
+   table and its power-sequencing section. Rows 1–7 of `hw/CARRIER.md` § 3 are
+   the whole of what stands between that document and a schematic, and every one
+   of them ships in the same box as the dev board in § 2 above.

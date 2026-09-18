@@ -477,6 +477,15 @@ odd pins 1–25 ground except 13; MIDI IN on 4; +5 V on 6, 10, 14; +12 V on 18;
 −12 V on 22; right audio out 20, left audio out 24; reset on 26; 2, 8, 12, 13,
 16 unused.
 
+> **Confirmed and corrected, 2026-09-18.** The pinout above was checked against
+> the netlists of three independently authored, independently *fabricated*
+> WaveBlaster boards (`hw/CARRIER.md` § 7.1). It is right, with two additions:
+> **pin 8 is MIDI OUT**, not unused, and **pins 12 and 16 are audio *inputs***
+> to the daughterboard, not unused. This design drives neither and must tolerate
+> both. Also revised: the "roughly 10–12 dB of attenuation" guessed elsewhere in
+> this document is **6 dB** once the PCM5102A's real 2.1 V RMS output is used —
+> `hw/CARRIER.md` § 6.2 shows the arithmetic.
+
 Three electrical details that bite on that header:
 
 - **MIDI is 5 V TTL, not a current loop.** No optocoupler, but you must level

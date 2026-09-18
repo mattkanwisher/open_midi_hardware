@@ -15,6 +15,8 @@ All four workstreams have reported once. What is settled and what is not:
 | Power-up sequencing: **unread**. The vendor warns wrong timing destroys the part. Four PDFs to fetch, none reachable from this session | **gates copper** |
 | Platform layer: designed, and its host harness builds and passes its own tests | closed for now |
 | Board versus module: **buy a vendor SoM first**. Within noise of our own board at qty 5, and the module vendor has already answered the routing and sequencing questions we cannot read | decided |
+| The carrier for that module: specified as an interface contract in `hw/CARRIER.md`, with the SoM-independent half — MIDI front end, analogue stage, WaveBlaster connector, power budget — finished at component level, and 22 named facts that need a vendor document before copper | **as far as this network goes** |
+| Daughterboard power: steady 1.66 W sits inside the only proven header envelope (a DB50XG's 2 W), but the 3.86 W turn-on peak does not. **Inrush limiting is a requirement, not a nicety** | new, `hw/CARRIER.md` § 9 |
 
 Next three actions, in order: get ROM dumps and a T113 board and run `bench/rtf`;
 read the efuse at SID+0x28 over FEL on whatever board arrives; fetch the four
@@ -78,8 +80,8 @@ out of emulation at all**, and § 0's gate still needs a real board and real ROM
 |---|---|
 | SoC | Allwinner T113-i: 2× Cortex-A7 @ 1.2 GHz, HiFi4 DSP, RISC-V E907, external DDR3 up to 2 GB, LFBGA, industrial temperature |
 | DRAM | One x16 4 Gbit DDR3L (512 MB). 256 MB is likely enough — MT-32 alone wants about 16 MB, the rest is SoundFont |
-| Audio out | I²S to a PCM5102A, line level, DC-blocked and attenuated for a WaveBlaster mixer input |
-| MIDI in | 3.3 V TTL UART at 31 250 baud. DIN via optocoupler on the standalone build; direct from the FPGA's MPU-401 decode on the card build. **No USB**, by choice — that is what keeps a non-Linux platform tractable |
+| Audio out | I²S to a PCM5102A, line level, **ground-centred** (the DirectPath output needs no DC block — `hw/CARRIER.md` § 6.3) and attenuated 6 dB for a WaveBlaster mixer input |
+| MIDI in | UART at 31 250 baud, in **three** front ends, not two: DIN via optocoupler on the standalone build; **5 V** TTL on WaveBlaster pin 4, level-shifted, when the card sits in a generic host; 3.3 V direct from the FPGA's MPU-401 decode when it sits on this project's own card. The middle one was previously conflated with the last — `hw/CARRIER.md` § 7.4. **No USB**, by choice — that is what keeps a non-Linux platform tractable |
 | Storage | microSD: ROMs, SoundFonts, config |
 | Software | U-Boot or awboot for DDR and clocks; RT-Thread or bare metal above it; `mt32emu` as the synth |
 
@@ -129,6 +131,12 @@ builds against the host, so `port/` can be exercised before silicon exists.
    audio out of its I²S, then MIDI in. Our board only has to be right after the
    software already works on someone else's.
 4. Our board, qty 5, once B and C agree on power, boot and DDR.
+
+Note on 3 and 4: with the SoM carrying the DDR3, **the carrier is a 4-layer
+board with no impedance control and no length-matched routing** — materially
+cheaper and faster to build than the bare-BGA test board `hw/HARDWARE.md` § 4.2
+was costed for. The classic way to lose a month (§ 4 below) is deleted along
+with it.
 
 ## 4. Risks
 
