@@ -114,9 +114,10 @@ a project-level decision, not a feature request.
 |---|---|---|
 | **OUT-1** | Stereo, **48 kHz**, 16-bit, via I²S to a PCM5102A, at line level. The PCM5102A's DirectPath output is **ground-centred and needs no DC-blocking capacitor** — fitting one would require a bipolar part at ±3 V and would add distortion for nothing. Keep the footprint, populate it with 0 Ω | `[read]` `hw/CARRIER.md` § 6.3. **Corrected 2026-09-18**; this table and `docs/PLAN.md` § 1 both said "DC-blocked" and both were wrong |
 | **OUT-2** | 48 kHz is produced by `mt32emu` **directly**, using `AnalogOutputMode_ACCURATE`, which upsamples inside the emulated analogue stage. **There MUST be no sample-rate converter anywhere in the system** | `[read]` `Synth.cpp:294-298` |
-| **OUT-3** | Fallback configuration, if the real-time factor demands it: `AnalogOutputMode_COARSE` at 32 kHz, with I²S at 32 kHz. Note this fallback *also* requires no resampler | `[read]` |
-| **OUT-4** | The I²S output **MUST run continuously from boot**, at the configured rate, in every state including every failure state | `[read]` `port/DESIGN.md` § 4.3 |
-| **OUT-5** | When there is nothing to play the output **MUST be digital silence, never a stuck DC level**, and never a hang | `[read]` |
+| **OUT-3** | Fallback **if the real-time factor demands it**: `AnalogOutputMode_COARSE` at 32 kHz, I²S at 32 kHz, still with no resampler | `[read]` |
+| **OUT-4** | **That fallback does not rescue a clock problem.** 32 kHz and 48 kHz are both in the 24.576 MHz family, so if the T113's audio PLL cannot be made to produce it, dropping to 32 kHz changes nothing. The escape routes are a resampler (ruled out on RTTI and a 32 KB stack buffer) or clocking the DAC from its own crystal — **which is copper, so it is a decision before the board, not after** | `[inferred]` `docs/PLAN.md` § 4; the PLL recipe is `MTP_T113_UNVERIFIED` in `port/t113/src/ccu.c` |
+| **OUT-5** | The I²S output **MUST run continuously from boot**, at the configured rate, in every state including every failure state | `[read]` `port/DESIGN.md` § 4.3 |
+| **OUT-6** | When there is nothing to play the output **MUST be digital silence, never a stuck DC level**, and never a hang | `[read]` |
 
 ### 2.3 Storage
 
@@ -193,7 +194,8 @@ power
 |---|---|---|
 | **HW-1** | Working DDR3. The firmware does **not** do DRAM init; U-Boot does | `[read]` |
 | **HW-2** | MMU off, D-cache off, as a consequence of PWR-1 | `[read]` |
-| **HW-3** | Whether the bootloader or the firmware configures the **audio PLL** | `[open]` — `port/DESIGN.md` § 8 raises this against workstream C. The answer decides whether the non-cacheable audio ring mapping is something the firmware configures or something it must request |
+| **HW-4** | The I²S block is **I²S1**, not I²S0. I²S0 feeds the on-chip codec, is absent from all of mainline, and appears only in a vendor HAL carrying no licence grant. I²S1 has a device-tree node, a driver binding, a DMA port number and a pin table | `[read]` `port/T113.md` |
+| **HW-3** | Whether the bootloader or the firmware configures the **audio PLL** | **Answered 2026-09-18: the firmware does.** So the non-cacheable ring mapping is ours to configure, and `port/t113/src/mmu.c` configures it — a 1 MB Normal Non-cacheable window for the ring and the DMA descriptors. The PLL recipe itself is still inferred, see OUT-4 |
 
 ---
 

@@ -45,14 +45,7 @@
 #include "t113.h"
 #include "t113_unverified.h"
 
-int printf(const char *fmt, ...);
-
-uint32_t t113_timer_frequency(void);
-void     t113_time_report(void);
-uint32_t t113_audio_dma_irqs(void);
-uint32_t t113_audio_played(void);
-uint32_t t113_audio_cur_src(void);
-uint32_t t113_gic_lines(void);
+#include "t113_libc.h"
 
 /* port/DESIGN.md 2.2: 128 frames, ring 3, target occupancy 2. 48 kHz from
  * 2.1. These are the design's numbers and they are not guesses; the two that

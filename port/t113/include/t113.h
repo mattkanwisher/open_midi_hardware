@@ -28,6 +28,7 @@ void t113_dcache_clean_range(const void *addr, uint32_t len);
  * is what answers the secure-vs-non-secure question. */
 extern uint32_t t113_entry_state[12];
 void t113_print_entry_state(void);
+void t113_print_assumptions(void);
 
 /* ---- GIC-400 (src/gic.c) ---------------------------------------------- */
 typedef void (*t113_irq_handler)(void);
@@ -38,6 +39,7 @@ void t113_gic_disable(unsigned intid);
 void t113_irq_dispatch(void);
 uint32_t t113_irq_count(void);
 uint32_t t113_spurious_count(void);
+uint32_t t113_gic_lines(void);
 
 /* ---- CCU (src/ccu.c) --------------------------------------------------- */
 void     t113_ccu_gate_and_reset(uint32_t bgr_reg, unsigned gate_bit,
@@ -89,6 +91,15 @@ void t113_dmac_start(unsigned ch, const t113_dma_lli *first_lli_phys,
                      uint32_t irq_mask);
 void t113_dmac_stop(unsigned ch);
 uint32_t t113_dmac_cur_src(unsigned ch);
+
+/* ---- timebase extras (src/t113_time.c) --------------------------------- */
+uint32_t t113_timer_frequency(void);
+void     t113_time_report(void);
+
+/* ---- audio extras (src/t113_audio.c), for the bring-up log ------------- */
+uint32_t t113_audio_dma_irqs(void);
+uint32_t t113_audio_played(void);
+uint32_t t113_audio_cur_src(void);
 
 /* ---- I2S (src/i2s.c) --------------------------------------------------- */
 /* Returns MTP_OK-ish (0) or negative. Configures I2S1 as clock master,

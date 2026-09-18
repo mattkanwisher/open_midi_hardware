@@ -25,8 +25,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "t113.h"
-
-int _write(int fd, const char *buf, int len);
+#include "t113_libc.h"
 
 typedef struct {
     char    *dst;       /* NULL => straight to the console */

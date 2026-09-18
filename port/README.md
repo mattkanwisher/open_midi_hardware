@@ -1,14 +1,16 @@
 # `port/` — the platform layer
 
 Workstream D. What `mt32emu` needs from below, the design of everything around
-it, and a host implementation you can run today.
+it, a host implementation you can run today, and the T113 one you cannot.
 
 | | |
 |---|---|
 | **[PORTING.md](PORTING.md)** | What `mt32emu` actually requires of a platform — C++ revision, STL surface, allocator behaviour, float versus fixed point, threads, file I/O — with the consequences for newlib + libstdc++, whether the two A7 cores help, and a measured memory budget |
+| **[T113.md](T113.md)** | The T113 implementation: every peripheral touched with its base address and citation, the clock tree, the pinmux, what is verified-by-source versus inferred versus unknown, and a numbered bring-up order for the first time a board exists |
 | **[DESIGN.md](DESIGN.md)** | The audio path and its latency budget, the 31250-baud MIDI parser, ROM and config loading, and the RT-Thread-versus-superloop call with the reasoning |
 | `include/` | The platform interface: audio sink, MIDI source, storage, timebase, log, plus the synth seam and the portable parser/render-loop headers |
 | `src/` | Portable port code — the MIDI parser and the render loop. The same files build for the host and for the T113 |
+| `t113/` | The T113 implementation of the same interface: GIC-400, CCU, pinmux, a DesignWare UART console, MIDI in on a second UART, I²S1 with a circular DMAC descriptor list, and SMHC0 with read-only FAT. Cross-compiles for Cortex-A7; **nothing in it has ever run** |
 | `host/` | A host implementation of the interface: the audio sink writes a WAV, the MIDI source reads a file, storage is the filesystem. Plus a fake synthesiser, so the whole structure runs with no ROMs and no `mt32emu` |
 
 ## Run it
@@ -29,6 +31,19 @@ cmake --build build
 ./build/mtp_host --engine mt32emu \
     --control-rom roms/MT32_CONTROL.ROM --pcm-rom roms/MT32_PCM.ROM
 ```
+
+For the T113:
+
+```sh
+cd t113
+make            # build/mt32-t113.elf and libmtp_t113.a, Cortex-A7, -Werror
+make uimage     # wrap for U-Boot `bootm`; see T113.md section 6 for what to
+                # do with it the first time a board exists
+```
+
+There is no `make run` and never will be: QEMU has no model of this SoC
+(`boot/BRINGUP.md` section 6.4). Compiling is the only verification available,
+which is why that build is as strict as it can be made.
 
 ROMs are Roland's. They are not here and never will be; the engine refuses to
 open without ones it recognises, and says why.

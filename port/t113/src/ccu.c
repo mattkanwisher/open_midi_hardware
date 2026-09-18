@@ -21,6 +21,10 @@
  * resampler. 48 kHz with 32-bit slots needs BCLK = 3.072 MHz, which needs an
  * audio clock in the 24.576 MHz family.
  *
+ * (A second disagreement, about which bits of this register enable the PLL,
+ * is written out in include/t113_soc.h next to PLL_AUDIO0_ENABLE. It is a
+ * different question from the one below and has a different failure mode.)
+ *
  * Mainline Linux CANNOT produce that family on this SoC. The reasons, in
  * order, each checked:
  *
@@ -186,6 +190,8 @@ uint32_t t113_ccu_audio_pll_init(uint32_t sample_rate)
      * order is the sunxi convention: the pattern register is only sampled
      * while SDM_EN is set, and SDM_EN is only meaningful while the PLL runs. */
     reg = *ccu(CCU_PLL_AUDIO0_CTRL);
+    /* Disable the PLL *and* its output gate before touching N, M or the SDM.
+     * See t113_soc.h on why PLL_AUDIO0_ENABLE is four bits and not one. */
     reg &= ~PLL_AUDIO0_ENABLE;
     *ccu(CCU_PLL_AUDIO0_CTRL) = reg;
     mtp_time_delay_us(10u);
@@ -199,6 +205,8 @@ uint32_t t113_ccu_audio_pll_init(uint32_t sample_rate)
     reg |= PLL_AUDIO0_SDM_EN;
     *ccu(CCU_PLL_AUDIO0_CTRL) = reg;
 
+    /* PLL enable, LDO enable, lock-detect enable and the output gate, all at
+     * once: three sources, two readings, and the union is safe (t113_soc.h). */
     reg |= PLL_AUDIO0_ENABLE;
     *ccu(CCU_PLL_AUDIO0_CTRL) = reg;
 

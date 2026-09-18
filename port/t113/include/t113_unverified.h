@@ -65,6 +65,7 @@ typedef struct {
 extern const mtp_t113_assumption __mtp_assumptions_start[];
 extern const mtp_t113_assumption __mtp_assumptions_end[];
 
-void t113_print_assumptions(void);
+/* t113_print_assumptions() is declared in t113.h with the rest of the board
+ * interface; it walks the table above and prints it at boot. */
 
 #endif /* T113_UNVERIFIED_H */

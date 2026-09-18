@@ -23,8 +23,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "t113.h"
-
-int printf(const char *fmt, ...);
+#include "t113_libc.h"
 
 extern char __heap_start[], __heap_end[];
 
@@ -117,7 +116,6 @@ struct _IO_FILE *stdin;
 
 /* port/PORTING.md 4.1 lists div (Display.cpp:227). abs comes from TVP.cpp:88,
  * which that table missed -- one symbol more than the twenty it counted. */
-typedef struct { int quot; int rem; } t113_div_t;
 t113_div_t div(int num, int den)
 {
     t113_div_t r;
@@ -136,8 +134,8 @@ void *memcpy(void *d, const void *s, size_t n)
     /* word copy when both ends line up; this is the hot one, mt32emu copies
      * the expanded PCM ROM and every sysex through it */
     if (((uintptr_t)dd | (uintptr_t)ss) % 4u == 0u) {
-        uint32_t *dw = (uint32_t *)dd;
-        const uint32_t *sw = (const uint32_t *)ss;
+        uint32_t *dw = (uint32_t *)(void *)dd;
+        const uint32_t *sw = (const uint32_t *)(const void *)ss;
         while (n >= 4u) { *dw++ = *sw++; n -= 4u; }
         dd = (unsigned char *)dw; ss = (const unsigned char *)sw;
     }
@@ -162,7 +160,7 @@ void *memset(void *d, int c, size_t n)
     unsigned char v = (unsigned char)c;
     if ((uintptr_t)dd % 4u == 0u) {
         uint32_t w = (uint32_t)v * 0x01010101u;
-        uint32_t *dw = (uint32_t *)dd;
+        uint32_t *dw = (uint32_t *)(void *)dd;
         while (n >= 4u) { *dw++ = w; n -= 4u; }
         dd = (unsigned char *)dw;
     }

@@ -14,6 +14,7 @@ All four workstreams have reported once. What is settled and what is not:
 | DDR3 address/command routing: straight through, no swizzle, with the reasoning and the one-command efuse check in `hw/HARDWARE.md` § 5.4 | closed, pending that check |
 | Power-up sequencing: **unread**. The vendor warns wrong timing destroys the part. Four PDFs to fetch, none reachable from this session | **gates copper** |
 | Platform layer: designed, and its host harness builds and passes its own tests | closed for now |
+| The T113 implementation of the seam now **exists and cross-compiles** — `port/t113/`, every address double-sourced against mainline and against a bare-metal T113 firmware that runs on the part. Not one register has been written on silicon | written, unrun |
 | Board versus module: **buy a vendor SoM first**. Within noise of our own board at qty 5, and the module vendor has already answered the routing and sequencing questions we cannot read | decided |
 | The carrier for that module: specified as an interface contract in `hw/CARRIER.md`, with the SoM-independent half — MIDI front end, analogue stage, WaveBlaster connector, power budget — finished at component level, and 22 named facts that need a vendor document before copper | **as far as this network goes** |
 | Daughterboard power: steady 1.66 W sits inside the only proven header envelope (a DB50XG's 2 W), but the 3.86 W turn-on peak does not. **Inrush limiting is a requirement, not a nicety** | new, `hw/CARRIER.md` § 9 |
@@ -157,6 +158,36 @@ with it.
   address/command routing must match whatever table we program. That is a
   schematic decision taken before fab, not a software tune, and it needs either a
   published T113-i board schematic or a part in hand to read the efuse.
+- **The T113's audio PLL has no documented 48 kHz recipe, and the fallback
+  everyone assumes exists does not help.** Found 2026-09-18 by workstream D.
+  The I²S module clock's only parents are the four audio clocks — there is no
+  path from PLL_PERIPH0. PLL_AUDIO1 is integer-N off 24 MHz and 24.576/24 =
+  128/125, so the smallest integer multiple needs N = 128, i.e. 3072 MHz, above
+  the driver's own 3000 MHz ceiling: it *cannot* reach the family. PLL_AUDIO0 is
+  fractional-N, but mainline drives its sigma-delta modulator from a lookup
+  table and the D1/T113 table has exactly one entry —
+  `{ 90316800, 0xc001288d, m=6, n=22 }` (`ccu-sun20i-d1.c:172`), which is
+  90.3168 MHz = 4 × 512 × 44 100. **The 44.1 kHz family is in the table and the
+  48 kHz family is not**, on this part or on the D1.
+
+  The port infers the missing entry — N = 40, fraction 0.96, pattern
+  `0xc001eb85`, M = 10 (even, as `ccu-sun20i-d1.c:168` requires) → 983.04 MHz
+  → 98.304 MHz → 24.576 MHz = 512 × 48 000 — from the fact that across four
+  sunxi CCU drivers the pattern word tracks only the fractional part of N and
+  never M, and that `ccu-sun50i-h616.c:227` contains that exact rate with that
+  exact pattern and N. It is tagged `MTP_T113_UNVERIFIED`, printed at boot, and
+  one `xfel write32` retries it on the first board.
+
+  **Why this is a risk and not a to-do:** `port/DESIGN.md` § 2.1 names
+  `AnalogOutputMode_COARSE` at 32 kHz as the fallback if the real-time factor
+  disappoints — but **32 kHz is in the same 24.576 MHz family**, so it is no
+  escape from a PLL problem at all. 44.1 kHz would need the `SampleRateConverter`
+  that § 2.1 rules out on RTTI, `<iostream>` and a 32 KB stack buffer. If the
+  inference is wrong, the options are: find the manual; take the resampler and
+  its costs; or **clock the PCM5102A from its own crystal rather than from the
+  SoC** — and that last one is copper. **So this is a decision for workstream B
+  before the board is drawn, not a software tune afterwards.**
+
 - **No USB host means no USB MIDI, ever, on this design.** That is a deliberate
   trade (§ 2.6 of the parent document) and it must stay deliberate.
 - **Licensing.** `mt32emu` is LGPL 2.1; static linking carries obligations, so

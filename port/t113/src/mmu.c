@@ -31,6 +31,7 @@
  */
 
 #include <stdint.h>
+#include "t113.h"
 
 extern uint32_t __pagetable_start[];
 extern char __dma_start[], __dma_end[];

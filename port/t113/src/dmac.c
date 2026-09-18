@@ -106,11 +106,19 @@ void t113_dmac_init(void)
         *dm(DMAC_IRQ_STAT(i)) = 0xFFFFFFFFu;
     }
 
-    t113_gic_set_handler(T113_IRQ_DMAC, dmac_isr);
-    /* Priority 0x40: more urgent than the MIDI UART's 0x60. On a GIC a lower
+    /* Both the non-secure and the secure DMAC lines, one handler. See
+     * include/t113_soc.h next to T113_IRQ_DMAC_SEC for why: which of the two
+     * a channel raises depends on the DMAC's security register and on which
+     * world we are in, and boot/BRINGUP.md 4.4 says we do not yet know the
+     * second of those.
+     *
+     * Priority 0x40: more urgent than the MIDI UART's 0x60. On a GIC a lower
      * number is higher priority. The audio block-completion interrupt is the
      * only hard deadline in the system; a MIDI byte can wait 320 us. */
+    t113_gic_set_handler(T113_IRQ_DMAC, dmac_isr);
     t113_gic_enable(T113_IRQ_DMAC, 0x40u);
+    t113_gic_set_handler(T113_IRQ_DMAC_SEC, dmac_isr);
+    t113_gic_enable(T113_IRQ_DMAC_SEC, 0x40u);
 }
 
 void t113_dmac_set_handler(unsigned ch, t113_irq_handler h)

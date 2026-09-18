@@ -27,6 +27,19 @@
  * Sources, with the exact commits read (2026-09-18):
  *   [L] torvalds/linux  5dd1818b15d98d4a20806cd00b1b40320b06004f
  *   [U] u-boot/u-boot   211de43d0f954a00a490220c1aac9db298287c40
+ *   [F] robots/allwinner_t113 (the FreeRTOS T113 port boot/BRINGUP.md 5.2
+ *       describes) cd687978044fb5d74c0a08309f0005b8782e1e14, 2024-05-12.
+ *       This one is [V-T113] by construction: it is a bare-metal Cortex-A7
+ *       firmware that runs on real T113 silicon, and its lib/aw/aw_t113s2.h
+ *       independently gives GPIO 0x02000000 with a 0x30 bank stride, CCU
+ *       0x02001000, UART0 0x02500000 at a 0x400 stride, I2S1 0x02033000,
+ *       DMAC 0x03002000, GIC 0x03020000 with the distributor at +0x1000 and
+ *       the CPU interface at +0x2000, SMHC0 0x04020000, and an interrupt
+ *       table that matches 32 + the device tree's SPI number for every
+ *       device this port uses. Where [F] and [L] agree, a number is as
+ *       verified as it can be without the datasheet. Where they disagree --
+ *       PLL_AUDIO0's enable bits, and the DMAC's two interrupt lines -- the
+ *       disagreement is written out at the point of use.
  * Paths below are relative to those trees; they are cloned, gitignored, under
  * port/vendor/.
  *
@@ -102,7 +115,23 @@
 #define T113_IRQ_UART(n)        T113_SPI_INTID(2u + (uint32_t)(n))
                                 /* [V-D1] [L] dtsi:328 (uart0 -> SPI 2),
                                  * 341, 354, 367, 380, 393: consecutive.     */
-#define T113_IRQ_DMAC           T113_SPI_INTID(50u)   /* [L] dtsi:505        */
+/* The DMA controller has TWO interrupt lines, and this is not visible in the
+ * device tree at all: [F] port/vendor/freertos-t113 lib/aw/aw_t113s2.h lists
+ *     DMAC_NS_IRQn = (82),   DMAC_S_IRQn = (83),
+ * i.e. SPI 50 and SPI 51, non-secure and secure. Linux's dtsi:505 declares
+ * only SPI 50, because Linux runs non-secure. boot/BRINGUP.md 4.4 says our
+ * own security state is the open question, and the DMAC's channel-security
+ * register (SUNXI_H3_SECURE_REG at offset 0x20, named but never written in
+ * linux drivers/dma/sun6i-dma.c:52) is what decides which line a channel
+ * raises. So src/dmac.c enables both and points them at one handler: the
+ * handler is idempotent -- it clears the status word before dispatching, so
+ * a second entry finds nothing -- and two GIC writes are cheaper than a
+ * silent no-interrupt failure that looks identical to a dead DMA engine.
+ *
+ * Evidence that 82 alone would probably have worked: the FreeRTOS T113 port
+ * enables only DMAC_NS_IRQn (common/aw/dmac.c:23-25) and its DMA runs. */
+#define T113_IRQ_DMAC           T113_SPI_INTID(50u)   /* [L] dtsi:505, [F]   */
+#define T113_IRQ_DMAC_SEC       T113_SPI_INTID(51u)   /* [F] only            */
 #define T113_IRQ_I2S1           T113_SPI_INTID(27u)   /* [L] dtsi:269        */
 #define T113_IRQ_I2S2           T113_SPI_INTID(28u)   /* [L] dtsi:284        */
 #define T113_IRQ_MMC0           T113_SPI_INTID(40u)   /* [L] dtsi:556        */
@@ -171,9 +200,44 @@
 #define PLL_AUDIO0_M_SHIFT      16u
 #define PLL_AUDIO0_M_MASK       0x3Fu
 #define PLL_AUDIO0_SDM_EN       (1u << 24)
-#define PLL_AUDIO0_ENABLE       (1u << 27)
-#define PLL_AUDIO0_LOCK         (1u << 28)
-#define PLL_AUDIO0_PAT_EN       (1u << 31)
+#define PLL_AUDIO0_PAT_EN       (1u << 31)   /* in the PATTERN register     */
+
+/* THE ENABLE BITS: THREE SOURCES, TWO ANSWERS. This is the clearest
+ * source disagreement in the whole port, so it is written out in full.
+ *
+ *   [L] ccu-sun20i-d1.c:174-175   .enable = BIT(27), .lock = BIT(28)
+ *   [L] ccu-sun50i-h616.c:232-233 .enable = BIT(31), .lock = BIT(28)
+ *       -- for a PLL_AUDIO at the *same* register offset 0x078 with the
+ *          *same* N/M/SDM field layout and the same pattern register at
+ *          0x178. Two mainline drivers, one register, different enable bits.
+ *   [F] port/vendor/freertos-t113 lib/aw/aw_t113s2.h + common/aw/ccu.c:279-286,
+ *       which runs on real T113 silicon:
+ *           PLL_AUDIO0_CTRL_REG |= BV(31) | BV(30);  // enable pll, ldo
+ *           PLL_AUDIO0_CTRL_REG |= BV(29);           // lock enable
+ *           while (!(... & BV(28)));                 // wait for pll stable
+ *
+ * The reading that makes all three true is the usual newer-Allwinner PLL
+ * layout: 31 = PLL enable, 30 = LDO enable, 29 = lock-detect enable,
+ * 28 = lock status, 27 = PLL output gate. Linux's D1 driver models only the
+ * output gate as "enable" because U-Boot has already turned the PLL on for
+ * it; a payload that is the first thing to touch PLL_AUDIO0 cannot assume
+ * that.
+ *
+ * So we set all four -- 31, 30, 29 and 27 -- and wait on 28. Setting a bit
+ * that is already set costs nothing; not setting one that is needed is a PLL
+ * that never locks, which is a silent failure that looks exactly like a wrong
+ * SDM pattern. Getting these two failure modes confused would waste a day on
+ * a board, which is why they are separated here in writing.
+ *
+ * WHAT WOULD SETTLE IT: the T113/D1 user manual, CCU chapter, the PLL_AUDIO0
+ * Control Register bit table. */
+#define PLL_AUDIO0_OUT_GATE     (1u << 27)   /* linux d1 calls this .enable */
+#define PLL_AUDIO0_LOCK         (1u << 28)   /* all three sources agree     */
+#define PLL_AUDIO0_LOCK_EN      (1u << 29)   /* freertos-t113 ccu.c:281     */
+#define PLL_AUDIO0_LDO_EN       (1u << 30)   /* freertos-t113 ccu.c:280     */
+#define PLL_AUDIO0_PLL_EN       (1u << 31)   /* freertos-t113, and h616     */
+#define PLL_AUDIO0_ENABLE       (PLL_AUDIO0_PLL_EN | PLL_AUDIO0_LDO_EN | \
+                                 PLL_AUDIO0_LOCK_EN | PLL_AUDIO0_OUT_GATE)
 
 /* "MP with mux and gate" module clocks: i2s0/1/2 at 0xa10/0xa14/0xa18 with
  * M at [4:0], P at [9:8], mux at [26:24], gate BIT(31).

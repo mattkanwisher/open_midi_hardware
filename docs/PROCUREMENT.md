@@ -54,11 +54,16 @@ enter this repository.
 
 1. `xfel read32 0x03006228` — bits [11:8] are the AC remapping selector. 13 or 14
    means stock mainline works with no patch (`hw/HARDWARE.md` § 5.4).
-2. `bench/rtf` on the busiest MT-32 score you have, pinned to one core, governor
+2. **Test the audio PLL inference before anything else that matters**, because
+   it is the one unknown with a copper consequence. `port/t113` prints its
+   assumptions at boot; if PLL_AUDIO0 does not lock at 24.576 MHz, the fallback
+   is *not* 32 kHz (same family) — see `docs/PLAN.md` § 4. One `xfel write32`
+   retries a different pattern word.
+3. `bench/rtf` on the busiest MT-32 score you have, pinned to one core, governor
    at performance, at 32 kHz and again at 48 kHz.
-3. The four hardware PDFs (`hw/HARDWARE.md` § 7 items 1 and 7) from a network
+4. The four hardware PDFs (`hw/HARDWARE.md` § 7 items 1 and 7) from a network
    that can reach whycan, 100ask and Forlinx — this session cannot.
-4. **Read the SoM's hardware manual into `hw/ref/`** — specifically its pin-mux
+5. **Read the SoM's hardware manual into `hw/ref/`** — specifically its pin-mux
    table and its power-sequencing section. Rows 1–7 of `hw/CARRIER.md` § 3 are
    the whole of what stands between that document and a schematic, and every one
    of them ships in the same box as the dev board in § 2 above.
