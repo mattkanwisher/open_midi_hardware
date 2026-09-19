@@ -11,3 +11,7 @@ build/
 *.elf
 *.bin
 *.wav
+
+# Retail game data used for testing the module; never committed.
+old_games/
+.DS_Store

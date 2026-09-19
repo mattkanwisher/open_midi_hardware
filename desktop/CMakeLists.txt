@@ -82,8 +82,7 @@ if(APPLE)
     "-framework AudioToolbox"
     "-framework CoreMIDI")
   target_sources(mt32-desktop PRIVATE src/desktop_midi_seq_core.c)
-  message(STATUS "mt32-desktop: OS MIDI port = CoreMIDI (NEVER COMPILED OR RUN "
-                 "-- see FINDINGS.md)")
+  message(STATUS "mt32-desktop: OS MIDI port = CoreMIDI")
 elseif(UNIX)
   # miniaudio dlopens libasound/libpulse at run time, so playback needs no
   # development packages at all. The ALSA *sequencer* (MIDI in from a keyboard

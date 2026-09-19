@@ -56,7 +56,7 @@ Everything below was executed in this session, on x86-64 Ubuntu 24.04, GCC 13.3.
 - **That anything is audible.** This machine has no sound device. Nothing here
   has ever been through a speaker. The ALSA run used ALSA's `null` PCM, which
   discards samples as fast as it is given them.
-- **That the macOS build compiles**, let alone works. See section 4.
+- ~~That the macOS build compiles~~ — it does, since 2026-09-19. See section 4.
 - **Anything at all about speed on a Cortex-A7.** See section 3.
 - **That `mt32emu` produces correct MT-32 audio**, because there are no ROMs and
   the library refuses to open without recognised ones, by design.
@@ -148,19 +148,35 @@ section 0, and `bench/rtf` on real silicon remains the only answer.
 
 ---
 
-## 4. macOS is written but unverified
+## 4. macOS: verified on 2026-09-19, one hole left
+
+Everything below the rule was written before anyone had a Mac. It stays as the
+record of what was expected to break. What actually happened, on Apple silicon,
+macOS 15.6, Xcode command-line clang, CMake 4.4.3, Munt at the pinned commit:
+
+| | |
+|---|---|
+| `cmake -S desktop -B desktop/build && cmake --build desktop/build -j` | **builds clean**, no warnings, no fixes needed; none of the four "likely candidates" below fired |
+| `./desktop/test.sh` | **26 of 27 pass**; the tty case is now a documented skip (next row) |
+| tty through a pty | `IOSSIOSPEED` returns `ENOTTY` on a macOS pty. Only a real serial driver honours it. The code is as written; the test double cannot exercise it here. Needs a USB-serial adapter on the desk |
+| `--list-devices` | Core Audio enumerates the six playback devices on the machine |
+| CoreAudio playback | **audible**, through the default device, first try |
+| `--midi-seq` | virtual destination `mt32-t113` appears; DOSBox-X's `mixer /listmidi` sees it and opens it by name |
+| **Space Quest III via DOSBox-X** (`games/sq3/run.sh`) | 140 s of play: **32 536 bytes, 6 135 short messages, 314 sysex, 0 orphan data, 0 aborted, 0 oversize, 0 FIFO overruns, 0 back-pressure**. The 314 sysex are MT32.DRV's start-up upload (patches, timbres, the display message) plus the per-room patch changes, delivered whole across the CoreMIDI packet boundary |
+| underruns in that run | **2**, both at 29 s, with a worst render of 7.6 ms against a 2.67 ms block and a worst render-loop wake of 26 ms — a scheduler hiccup on a laptop with a browser open, not the ring discipline; occupancy never fell below 1 of 8 |
+| fake engine under a real game | peak 32767: SQ3 plays enough voices at once to clip the sine stand-in. Cosmetic — it is not the engine anyone will ship |
+
+So: the Apple branch of `CMakeLists.txt`, `desktop_midi_seq_core.c` and the
+CoreAudio path are proven. The `__APPLE__` half of `desktop_midi_tty.c` compiles
+and executes up to the ioctl, and stops there for lack of hardware.
+
+### The record, as written before the Mac
 
 `src/desktop_midi_seq_core.c` (CoreMIDI) and the `__APPLE__` half of
-`src/desktop_midi_tty.c` (`IOSSIOSPEED`) **have never been compiled or run.**
-There was no Mac in this session and there is no way to cross-check them. The
-CoreAudio path is miniaudio's, which is widely used, but our `CMakeLists.txt`
-Apple branch — the framework list, `MA_NO_RUNTIME_LINKING` — is equally
-unverified.
-
-They are written carefully and guarded so they cannot break the Linux build
-(proven: the Linux build is clean, and the `desktop_midi_seq_none.c` fallback
-compiles too), but **do not report the macOS build as working until someone has
-run it.** Expect to fix something on first contact. The likely candidates:
+`src/desktop_midi_tty.c` (`IOSSIOSPEED`) had never been compiled or run.
+The CoreAudio path is miniaudio's, which is widely used, but our `CMakeLists.txt`
+Apple branch — the framework list, `MA_NO_RUNTIME_LINKING` — was equally
+unverified. The candidates expected to break on first contact, none of which did:
 
 - `MIDIInputPortCreate` and `MIDIReadProc` are deprecated from macOS 11 in
   favour of `MIDIInputPortCreateWithProtocol`. They still work and still deliver
@@ -334,8 +350,8 @@ the same, so nothing is broken. It might be worth saying in `mtp_render.h` that
 
 In rough order of value per hour:
 
-1. **Run it on a Mac.** Half of section 4 evaporates, and the CoreMIDI path
-   either works or is fixed in an afternoon.
+1. ~~**Run it on a Mac.**~~ Done 2026-09-19; see section 4. The CoreMIDI path
+   worked unmodified and a real game has been through it.
 2. **Run it on a Linux machine with a sound card and a MIDI keyboard**, with
    ROMs. That is the first time anyone will have heard this project, and it is
    also the first real test of whether 128 frames x 3 blocks is comfortable on a

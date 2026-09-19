@@ -45,9 +45,12 @@ cmake --build desktop/build -j
 
 No other dependencies: CoreAudio, CoreMIDI and CoreFoundation ship with the OS.
 
-> The macOS paths in this directory have **never been compiled or run** — the
-> session that wrote them had no Mac. Expect to fix something the first time.
-> See [FINDINGS.md](FINDINGS.md).
+> First built and run on a Mac on 2026-09-19 (Apple silicon, macOS 15, clang
+> from Xcode CLT, CMake 4.4): clean build, `test.sh` passes, CoreAudio plays,
+> and the CoreMIDI virtual destination takes a whole game's worth of MIDI from
+> DOSBox-X — see [games/sq3/](games/sq3/README.md). The one thing still
+> unproven on macOS is the serial path, because a pty refuses `IOSSIOSPEED`.
+> See [FINDINGS.md](FINDINGS.md) § 4.
 
 ### What the build picks up
 
