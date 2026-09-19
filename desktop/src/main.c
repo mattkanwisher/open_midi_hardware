@@ -67,6 +67,9 @@ static void usage(const char *argv0)
 #ifdef MTP_WITH_MT32EMU
                                               ", mt32emu"
 #endif
+#ifdef MTP_WITH_FLUIDSYNTH
+                                              ", fluidsynth"
+#endif
                                                         "\n"
 "  --roms DIR             directory holding the ROM images\n"
 "  --machine NAME         mt32 (default) or cm32l; picks the ROM file names\n"
@@ -74,6 +77,8 @@ static void usage(const char *argv0)
 "  --pcm-rom PATH         PCM ROM, overriding --roms/--machine\n"
 "  --control-rom2 PATH    second half of a split control ROM image\n"
 "  --pcm-rom2 PATH        second half of a split PCM ROM image\n"
+"  --soundfont FILE       SF2 bank for the fluidsynth engine (GM/GS); given on\n"
+"                         its own it also selects that engine\n"
 "  --gain G               master output gain, 1.0 = unity (default 1.0)\n"
 "  --no-reverb            open the synth with reverb off\n"
 "  --partials N           partial limit, 32 is a real MT-32 (default 32)\n"
@@ -99,6 +104,7 @@ int main(int argc, char **argv)
     const char *machine = "mt32";
     const char *control_rom = NULL, *pcm_rom = NULL;
     const char *control_rom2 = NULL, *pcm_rom2 = NULL;
+    const char *soundfont = NULL;
     const char *audio_backend = "auto", *audio_device = NULL, *tap = NULL;
     const char *smf = NULL;
     int   smf_loop = 0, reverb = 1, verbose = 0, quiet = 0, i;
@@ -138,6 +144,7 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--pcm-rom"))    NEXT(pcm_rom);
         else if (!strcmp(a, "--control-rom2"))NEXT(control_rom2);
         else if (!strcmp(a, "--pcm-rom2"))   NEXT(pcm_rom2);
+        else if (!strcmp(a, "--soundfont"))  NEXT(soundfont);
         else if (!strcmp(a, "--gain"))    { const char *v; NEXT(v); gain = atof(v); }
         else if (!strcmp(a, "--no-reverb"))  reverb = 0;
         else if (!strcmp(a, "--midi-loop"))  smf_loop = 1;
@@ -217,6 +224,15 @@ int main(int argc, char **argv)
 
     if (!strcmp(engine_name, "fake")) {
         vt = &mtp_engine_fake;
+#ifdef MTP_WITH_FLUIDSYNTH
+    } else if (!strcmp(engine_name, "fluidsynth") ||
+               (!strcmp(engine_name, "auto") && soundfont)) {
+        vt = &mtp_engine_fluidsynth;
+#else
+    } else if (!strcmp(engine_name, "fluidsynth") || soundfont) {
+        MTP_LOGE("this build has no fluidsynth (install it and reconfigure)");
+        return 2;
+#endif
 #ifdef MTP_WITH_MT32EMU
     } else if (!strcmp(engine_name, "mt32emu")) {
         vt = &mtp_engine_mt32emu;
@@ -250,6 +266,7 @@ int main(int argc, char **argv)
     ecfg.pcm_rom_path      = pcm_rom;
     ecfg.control_rom_path2 = control_rom2;
     ecfg.pcm_rom_path2     = pcm_rom2;
+    ecfg.soundfont_path    = soundfont;
     ecfg.output_rate      = rate;
     ecfg.max_partials     = partials;
     ecfg.reverb_enabled   = reverb;

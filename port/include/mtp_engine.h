@@ -17,6 +17,11 @@
  * regardless of the output rate (mt32emu/globals.h:94, Synth.h:370-377). The
  * render loop converts; the engine never sees wall-clock time.
  *
+ * host/engine_fluidsynth.c is the second real engine: a SoundFont sampler for
+ * the General MIDI / GS half of the module. FluidSynth has no timestamped
+ * event entry point, so that file keeps its own queue on the output clock and
+ * reports timebase_rate() == output_rate. Nothing above the seam knows.
+ *
  * SPDX-License-Identifier: 0BSD
  */
 #ifndef MTP_ENGINE_H
@@ -44,6 +49,7 @@ typedef struct {
      * exist -- two pointers, no allocation, no extra call. */
     const char *control_rom_path2;
     const char *pcm_rom_path2;
+    const char *soundfont_path;    /* SF2 for the GM/GS engine; NULL otherwise */
     uint32_t    output_rate;       /* Hz the engine must produce          */
     uint32_t    max_partials;      /* 32 = a real MT-32                   */
     int         reverb_enabled;
@@ -106,6 +112,9 @@ typedef struct {
 extern const mtp_engine_vtable mtp_engine_fake;     /* src/engine_fake.c     */
 #ifdef MTP_WITH_MT32EMU
 extern const mtp_engine_vtable mtp_engine_mt32emu;  /* host/engine_mt32emu.cpp */
+#endif
+#ifdef MTP_WITH_FLUIDSYNTH
+extern const mtp_engine_vtable mtp_engine_fluidsynth; /* host/engine_fluidsynth.c */
 #endif
 
 #ifdef __cplusplus

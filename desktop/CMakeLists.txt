@@ -126,10 +126,30 @@ else()
                  "(-DMT32EMU_SOURCE_DIR=<path to munt/mt32emu> to add the real one)")
 endif()
 
+# The GM/GS engine: FluidSynth from the system, found through pkg-config
+# (brew install fluid-synth / apt install libfluidsynth-dev). Optional: without
+# it the build is exactly what it was. Set MTP_FLUIDSYNTH=OFF to leave it out.
+option(MTP_FLUIDSYNTH "Build the fluidsynth (GM/GS SoundFont) engine if found" ON)
+if(MTP_FLUIDSYNTH)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(FLUIDSYNTH IMPORTED_TARGET fluidsynth>=2.2)
+  endif()
+  if(FLUIDSYNTH_FOUND)
+    target_sources(mt32-desktop PRIVATE ${PORT_DIR}/host/engine_fluidsynth.c)
+    target_compile_definitions(mt32-desktop PRIVATE MTP_WITH_FLUIDSYNTH)
+    target_link_libraries(mt32-desktop PRIVATE PkgConfig::FLUIDSYNTH)
+    message(STATUS "mt32-desktop: fluidsynth ${FLUIDSYNTH_VERSION} engine (GM/GS via --soundfont)")
+    message(STATUS "mt32-desktop: fluidsynth is LGPL 2.1 -- see README.md, Licences")
+  else()
+    message(STATUS "mt32-desktop: no fluidsynth found; GM/GS engine not built")
+  endif()
+endif()
+
 # ------------------------------------------------------------------- tests ---
 
 enable_testing()
-# test.sh is the real suite: 27 assertions, none of which need a sound card,
+# test.sh is the real suite: 34 assertions (39 with fluidsynth and a SoundFont), none of which need a sound card,
 # MIDI hardware or ROMs. ctest just runs it, so there is one set of tests and
 # not two that drift.
 add_test(NAME suite

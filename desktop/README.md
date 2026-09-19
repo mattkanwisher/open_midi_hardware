@@ -26,6 +26,7 @@ only `bench/rtf` on real silicon can answer it. See [FINDINGS.md](FINDINGS.md).
 ```sh
 sudo apt install build-essential cmake        # Debian/Ubuntu
 sudo apt install libasound2-dev               # optional: MIDI in from a keyboard or DAW
+sudo apt install libfluidsynth-dev            # optional: the GM/GS SoundFont engine
 cmake -S desktop -B desktop/build
 cmake --build desktop/build -j
 ```
@@ -39,6 +40,7 @@ for `--midi-seq`, and everything else still works without it.
 ```sh
 xcode-select --install                        # if you have not already
 brew install cmake
+brew install fluid-synth                      # optional: the GM/GS SoundFont engine
 cmake -S desktop -B desktop/build
 cmake --build desktop/build -j
 ```
@@ -57,6 +59,7 @@ No other dependencies: CoreAudio, CoreMIDI and CoreFoundation ship with the OS.
 ```
 -- mt32-desktop: OS MIDI port = ALSA sequencer
 -- mt32-desktop: linking mt32emu from .../bench/vendor/munt/mt32emu
+-- mt32-desktop: fluidsynth 2.6.0 engine (GM/GS via --soundfont)
 ```
 
 `mt32emu` is found automatically in `bench/vendor/munt/mt32emu` and built out of
@@ -65,6 +68,12 @@ source — nothing under `bench/` is written to. To build without it:
 ```sh
 cmake -S desktop -B desktop/build -DMT32EMU_SOURCE_DIR=
 ```
+
+FluidSynth is taken from the system through `pkg-config` and is optional too
+(`-DMTP_FLUIDSYNTH=OFF` to leave it out even when present). It is the second
+real engine behind the same seam: General MIDI and GS from a SoundFont, for
+games that were written for an SC-55 rather than an MT-32. See
+[games/dracula/](games/dracula/README.md), which plays both.
 
 ---
 
@@ -311,6 +320,26 @@ A ROM that `mt32emu` does not recognise is named and refused rather than played
 as noise. That is `port/DESIGN.md` § 4.3 working, and it is the same code path
 the T113 will take off the SD card.
 
+### The other half: General MIDI and GS
+
+```sh
+./desktop/build/mt32-desktop --soundfont ~/soundfonts/GeneralUser-GS.sf2 --midi-seq
+```
+
+`--soundfont` selects the FluidSynth engine (`--engine fluidsynth` says the
+same thing). It is configured the way an SC-55 presents itself — GS bank
+select semantics, device ID `10h`, drums on channel 10, GS reset honoured — so
+a game's "SC-55" option talks to it without knowing the difference, within the
+limits of the bank you load. GeneralUser GS (about 32 MB, free) is the one the
+plan sizes the DRAM for and the one this was tested with. It is not an SC-55:
+`docs/background.md` explains why cycle-accurate SC-55 emulation is out of the
+module's CPU budget.
+
+Timing inside this engine is done by `port/host/engine_fluidsynth.c` itself,
+because FluidSynth has no timestamped event entry point: a fixed queue on the
+output clock, drained in 32-frame sub-blocks inside `render()`. Nothing above
+the seam can tell the two engines apart, which is the point of the seam.
+
 ---
 
 ## Reporting
@@ -339,7 +368,8 @@ The process exits non-zero if there was an underrun, so it is usable in a script
 ./desktop/test.sh
 ```
 
-27 assertions, none of which need a sound card, MIDI hardware or ROMs: the loop
+34 assertions, none of which need a sound card, MIDI hardware or ROMs (plus
+5 for the fluidsynth engine, of which 3 only run where a SoundFont is): the loop
 against a device that is pulling at it, the demo wire stream through stdin, a
 16 kB timbre bank dump reassembled while audio flows, a stream that is malformed
 in three separate ways, an SMF, `mt32emu` refusing both missing and wrong ROMs,
@@ -360,5 +390,10 @@ with no sound device can.
   in, which carries the usual obligations; the boundary is one file,
   `port/host/engine_mt32emu.cpp`, and the library is built from the unmodified
   vendored source in `bench/vendor/munt/`.
+- **FluidSynth** — LGPL 2.1, linked from the system when present; the
+  boundary is `port/host/engine_fluidsynth.c`.
+- **SoundFonts** — whatever their authors say. GeneralUser GS carries its own
+  licence file, which permits use and redistribution; it is not in this
+  repository either, because 32 MB does not belong in git.
 - **Everything in `desktop/src`** — 0BSD, like the rest of `port/`.
 - **ROMs** — Roland's. Dump your own. Never redistribute them.

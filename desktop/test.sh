@@ -244,6 +244,59 @@ else
     echo "skip mt32emu cases (built without it)"
 fi
 
+# --- 6b. the GM/GS engine: refuses without a bank, plays with one ------------
+if $BIN --help | grep -q fluidsynth; then
+    set +e
+    $BIN --audio null --engine fluidsynth --seconds 1 > r6b.txt 2>&1
+    rc=$?
+    set -e
+    [ "$rc" != "0" ] && echo "ok   fluidsynth without a SoundFont exits non-zero ($rc)" \
+                     || { echo "FAIL fluidsynth without a SoundFont exited 0"; fail=1; }
+    expect_grep "fluidsynth says what it needs" "needs a SoundFont" r6b.txt
+
+    # A real bank is a 30 MB download, so this half only runs where one is.
+    SF=${SOUNDFONT:-$HOME/soundfonts/GeneralUser-GS.sf2}
+    if [ -f "$SF" ]; then
+        python3 - <<'PY'
+import struct
+def vlq(n):
+    b=[n&0x7f]; n>>=7
+    while n: b.insert(0,(n&0x7f)|0x80); n>>=7
+    return bytes(b)
+# GS reset, a program change, two notes on ch 1, a kick on ch 10, end
+ev=(vlq(0)+bytes([0xF0])+vlq(10)+bytes([0x41,0x10,0x42,0x12,0x40,0x00,0x7F,0x00,0x41,0xF7])
+   +vlq(0)+bytes([0xC0,0x18])
+   +vlq(0)+bytes([0x90,60,100])+vlq(240)+bytes([0x80,60,0])
+   +vlq(0)+bytes([0x99,36,120])+vlq(120)+bytes([0x89,36,0])
+   +vlq(0)+bytes([0x90,67,100])+vlq(480)+bytes([0x80,67,0])
+   +vlq(0)+bytes([0xFF,0x2F,0x00]))
+open('gs.mid','wb').write(b'MThd'+struct.pack('>IHHH',6,0,1,480)+b'MTrk'+struct.pack('>I',len(ev))+ev)
+PY
+        # Not asserted on underruns: this engine's first blocks touch 32 MB
+        # of freshly loaded samples, and on the null device's bursty clock
+        # that is enough to spill a few blocks on a loaded machine. What is
+        # asserted is what this case is for -- the messages reach the engine
+        # and audio comes out -- so its exit status is deliberately ignored.
+        set +e
+        $BIN --audio null --ring 16 --status-ms 0 --soundfont "$SF" --midi-smf gs.mid \
+             --tap-wav gs.wav > r6c.txt 2>&1
+        set -e
+        grep -qE '^messages +7 short, 1 sysex' r6c.txt \
+          && echo "ok   gs smf parsed (7 short, 1 sysex)" \
+          || { echo "FAIL gs smf parse: $(grep -E '^messages' r6c.txt)"; fail=1; }
+        expect "gs smf back-pressure" "^engine back-pressure" 0 r6c.txt
+        peak=$(python3 -c "
+import wave,array
+w=wave.open('gs.wav'); d=array.array('h',w.readframes(w.getnframes())); print(max(abs(x) for x in d))")
+        [ "$peak" -gt 1000 ] && echo "ok   fluidsynth produced audio (peak $peak)" \
+                             || { echo "FAIL fluidsynth output is silent (peak $peak)"; fail=1; }
+    else
+        echo "skip fluidsynth playback: no SoundFont at $SF (set SOUNDFONT)"
+    fi
+else
+    echo "skip fluidsynth cases (built without it)"
+fi
+
 # --- 7. the OS MIDI port, which may legitimately not exist -----------------
 set +e
 $BIN --audio null --midi-seq --seconds 1 > r8.txt 2>&1
