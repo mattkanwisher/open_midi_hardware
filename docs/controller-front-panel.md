@@ -16,6 +16,22 @@ Same source tags as `hw/HARDWARE.md`: **[DS]** datasheet, **[C]** community
 nothing was fetched), **[I]** engineering judgement, **[GUESS]** a number to be
 replaced.
 
+> **Revision, 2026-09-21, later the same day.** Decision 2 below is superseded.
+> The console sockets no longer sit on one big panel PCB; each family is its
+> own **module** (a card parallel to the plate with the sockets on its front
+> face, straight or on a small shelf, and a 2×8 header on its bottom edge)
+> behind its own **panel segment**, on a 25 mm slot
+> grid, plugged into a main board that is only a USB hub, power and the button
+> and display harness. The slot's seven IO lines follow the MiSTer SNAC channel
+> order, so a one-slot segment of USB3-A sockets turns any slot into a MiSTer
+> user port and lets SNAC adapters other people already make cover a console
+> the panel has no module for. The reason is sourcing: a hard-to-find socket
+> now delays one module, not the panel. The generated KiCad boards, the slot
+> pinout and the grid live in `hw/panel/` (start with its README). Decision 1
+> stands, with one change: the bridge MCU moves from the main board into each
+> USB module. §§ 3, 7 and 8 below describe the earlier single-board version
+> and are kept as the reasoning record.
+
 ## 0. The two decisions everything else follows from
 
 **1. The ports are bridged to USB HID by a microcontroller on the panel PCB;
