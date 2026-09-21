@@ -10,7 +10,7 @@ Outputs (all in this directory):
   frame.kicad_pcb           hidden FR4 skeleton the segments screw to
   seg_<name>.kicad_pcb      one visible panel segment each (aluminium-core PCB)
   card_template.kicad_pcb   starting point for a cassette card (PCB parallel to the plate)
-  backplane.kicad_pcb       the rear board: one SNAC port per slot, 80 mm behind the plate
+  backplane/backplane.kicad_pcb  the rear board, in its own project with the schematic
   preview.svg               the example assembly, drawn from the same tables
 
 Coordinates follow KiCad: millimetres, x to the right, y DOWN. The panel's
@@ -563,7 +563,8 @@ def main():
         build_segment(seg).write(HERE / f"seg_{seg['name']}.kicad_pcb")
     build_frame().write(HERE / "frame.kicad_pcb")
     build_card_template().write(HERE / "card_template.kicad_pcb")
-    build_backplane().write(HERE / "backplane.kicad_pcb")
+    (HERE / "backplane").mkdir(exist_ok=True)
+    build_backplane().write(HERE / "backplane" / "backplane.kicad_pcb")
     preview_svg(HERE / "preview.svg")
     pro = HERE / "panel.kicad_pro"
     if not pro.exists():

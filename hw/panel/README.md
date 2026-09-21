@@ -24,7 +24,7 @@ python3 hw/panel/gen_panel.py
 | `seg_display.kicad_pcb` | 3 slots: window for a 2.42" 128 × 64 OLED | same |
 | `seg_blank1`, `seg_blank2` | blanks | same |
 | `card_template.kicad_pcb` | outline, standoff holes, row marks and ribbon header for a cassette card | start of every module |
-| `backplane.kicad_pcb` | the rear board, 300 × 88 mm, 80 mm behind the plate: a SNAC port per slot as a USB3-A socket plus a 2×5 ribbon header, the harness header, four hub headers | FR4, 4-layer once routed |
+| `backplane/` | the rear board's own project: `backplane.kicad_sch` from `gen_backplane_sch.py` (two RP2350B, two FE1.1s hubs, ten ports with DIP identity, pass-through), `backplane.kicad_pcb` from `gen_panel.py` (outline, rails, connectors on the grid). Circuit described in `BACKPLANE.md` | FR4, 4-layer once routed |
 | `preview.svg` | the example assembly, drawn from the same numbers | — |
 | `panel.kicad_pro` | the KiCad project; open any board from it | — |
 
@@ -131,8 +131,8 @@ dongles use the socket.
 
 There is no 3.3 V supply on the port and no sense pin: a cassette that needs
 3.3 V (PlayStation, N64, GameCube) makes it with an LDO, as SNAC adapters do,
-and the backplane learns what is on each port from a DIP switch per port, or
-by probing in firmware for the consoles that answer an identify command.
+and the backplane learns what is on each port from a 4-position DIP switch
+beside the port, whose codes are in `BACKPLANE.md` § 3.
 
 ### 3.2 SNAC channel order
 
@@ -162,8 +162,9 @@ board with a meter and record it here.
 
 ### 3.3 What the backplane does with a port
 
-An RP2040 per four ports polls the native protocol over the ribbon and
-presents each pad as a USB HID gamepad through the hub. This is the original
+An RP2350B per five ports polls the native protocol over the ribbon and
+presents each pad as a USB HID gamepad through the hub; the DIP code picks
+the protocol (`BACKPLANE.md`). This is the original
 single-board electronics of the design study moved to a vertical board; the
 protocols, level and timing arguments there stand. Ten centimetres of ribbon
 at 3.3 V open-drain is the same signalling the MiSTer user port already runs
@@ -228,7 +229,8 @@ before routing; only the positions are meant to survive.
    and STEP model, so the whole mechanical chain (segment, rails, standoffs,
    card, ribbon, backplane port) can be proven without waiting on a single
    AliExpress socket.
-2. Backplane schematic: hub, two RP2040, the port pull-ups and ESD, power in,
-   the harness, the pass-through jumper.
+2. Backplane: ERC and footprint assignment in KiCad on the generated
+   schematic, complete the hub chips from the FE1.1s reference design, then
+   route (`BACKPLANE.md` § 6).
 3. Then the measured sockets, one cassette per family, in whatever order they
    arrive; a bought SNAC adapter behind a blank fills any gap meanwhile.
