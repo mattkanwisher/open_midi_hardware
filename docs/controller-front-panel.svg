@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="352" viewBox="0 0 1040 352">
+<style>
+ .panel{fill:#1b1b1d;stroke:#555;stroke-width:2}
+ .cut{fill:#050505;stroke:#8a8a8a;stroke-width:1.5}
+ .btn{fill:#2a2a2e;stroke:#c9c9c9;stroke-width:2}
+ .btnring{fill:none;stroke:#6fb7ff;stroke-width:2}
+ .oled{fill:#0a0a10;stroke:#8a8a8a;stroke-width:1.5}
+ .lbl{fill:#e8e8e8;font:13px monospace}
+ .big{fill:#e8e8e8;font:bold 24px monospace}
+ .brk{stroke:#e8e8e8;stroke-width:1}
+ .dim{fill:#9aa;font:11px monospace}
+</style>
+<rect class="panel" x="1" y="1" width="1038" height="350" rx="8"/>
+<circle class="cut" cx="24.0" cy="24.0" r="6.4"/>
+<circle class="cut" cx="1016.0" cy="24.0" r="6.4"/>
+<circle class="cut" cx="24.0" cy="328.0" r="6.4"/>
+<circle class="cut" cx="1016.0" cy="328.0" r="6.4"/>
+<circle class="btn" cx="56.0" cy="60.0" r="36.0"/>
+<circle class="btnring" cx="56.0" cy="60.0" r="26.0"/>
+<text class="lbl" x="12.0" y="66.0" text-anchor="start">PWR</text>
+<circle class="btn" cx="56.0" cy="136.0" r="36.0"/>
+<circle class="btnring" cx="56.0" cy="136.0" r="26.0"/>
+<text class="lbl" x="12.0" y="142.0" text-anchor="start">RST</text>
+<circle class="btn" cx="56.0" cy="212.0" r="36.0"/>
+<circle class="btnring" cx="56.0" cy="212.0" r="26.0"/>
+<text class="lbl" x="12.0" y="218.0" text-anchor="start">USR</text>
+<circle class="btn" cx="56.0" cy="288.0" r="36.0"/>
+<circle class="btnring" cx="56.0" cy="288.0" r="26.0"/>
+<text class="lbl" x="12.0" y="294.0" text-anchor="start">OSD</text>
+<rect class="cut" x="130.0" y="35.0" width="124.0" height="50.0" rx="12.0"/>
+<rect class="cut" x="130.0" y="111.0" width="124.0" height="50.0" rx="12.0"/>
+<rect class="cut" x="156.0" y="188.0" width="72.0" height="48.0" rx="8.0"/>
+<rect class="cut" x="156.0" y="264.0" width="72.0" height="48.0" rx="8.0"/>
+<line class="brk" x1="128.0" y1="26.0" x2="256.0" y2="26.0"/>
+<line class="brk" x1="128.0" y1="26.0" x2="128.0" y2="38.0"/>
+<line class="brk" x1="256.0" y1="26.0" x2="256.0" y2="38.0"/>
+<text class="lbl" x="192.0" y="18.0" text-anchor="middle">Genesis</text>
+<line class="brk" x1="152.0" y1="322.0" x2="232.0" y2="322.0"/>
+<line class="brk" x1="152.0" y1="322.0" x2="152.0" y2="310.0"/>
+<line class="brk" x1="232.0" y1="322.0" x2="232.0" y2="310.0"/>
+<text class="lbl" x="192.0" y="338.0" text-anchor="middle">NES</text>
+<rect class="cut" x="304.0" y="34.0" width="128.0" height="52.0" rx="12.0"/>
+<rect class="cut" x="304.0" y="110.0" width="128.0" height="52.0" rx="12.0"/>
+<rect class="cut" x="306.0" y="188.0" width="124.0" height="48.0" rx="24.0"/>
+<rect class="cut" x="306.0" y="264.0" width="124.0" height="48.0" rx="24.0"/>
+<line class="brk" x1="300.0" y1="26.0" x2="436.0" y2="26.0"/>
+<line class="brk" x1="300.0" y1="26.0" x2="300.0" y2="38.0"/>
+<line class="brk" x1="436.0" y1="26.0" x2="436.0" y2="38.0"/>
+<text class="lbl" x="368.0" y="18.0" text-anchor="middle">Saturn</text>
+<line class="brk" x1="300.0" y1="322.0" x2="436.0" y2="322.0"/>
+<line class="brk" x1="300.0" y1="322.0" x2="300.0" y2="310.0"/>
+<line class="brk" x1="436.0" y1="322.0" x2="436.0" y2="310.0"/>
+<text class="lbl" x="368.0" y="338.0" text-anchor="middle">SNES</text>
+<rect class="cut" x="476.0" y="46.0" width="56.0" height="28.0" rx="3.2"/>
+<rect class="cut" x="476.0" y="122.0" width="56.0" height="28.0" rx="3.2"/>
+<line class="brk" x1="472.0" y1="26.0" x2="536.0" y2="26.0"/>
+<line class="brk" x1="472.0" y1="26.0" x2="472.0" y2="38.0"/>
+<line class="brk" x1="536.0" y1="26.0" x2="536.0" y2="38.0"/>
+<text class="lbl" x="504.0" y="18.0" text-anchor="middle">USB</text>
+<rect class="oled" x="592.0" y="44.0" width="336.0" height="104.0" rx="4.0"/>
+<text class="dim" x="760.0" y="104.0" text-anchor="middle">256 x 64 OLED</text>
+<rect class="cut" x="472.0" y="190.0" width="152.0" height="44.0" rx="8.0"/>
+<rect class="cut" x="640.0" y="190.0" width="152.0" height="44.0" rx="8.0"/>
+<line class="brk" x1="472.0" y1="180.0" x2="792.0" y2="180.0"/>
+<line class="brk" x1="472.0" y1="180.0" x2="472.0" y2="192.0"/>
+<line class="brk" x1="792.0" y1="180.0" x2="792.0" y2="192.0"/>
+<text class="lbl" x="632.0" y="172.0" text-anchor="middle">PlayStation</text>
+<rect class="cut" x="442.0" y="258.0" width="76.0" height="60.0" rx="20.0"/>
+<rect class="cut" x="522.0" y="258.0" width="76.0" height="60.0" rx="20.0"/>
+<rect class="cut" x="602.0" y="258.0" width="76.0" height="60.0" rx="20.0"/>
+<rect class="cut" x="682.0" y="258.0" width="76.0" height="60.0" rx="20.0"/>
+<line class="brk" x1="444.0" y1="322.0" x2="756.0" y2="322.0"/>
+<line class="brk" x1="444.0" y1="322.0" x2="444.0" y2="310.0"/>
+<line class="brk" x1="756.0" y1="322.0" x2="756.0" y2="310.0"/>
+<text class="lbl" x="600.0" y="338.0" text-anchor="middle">N64</text>
+<text class="big" x="992.0" y="176.0" text-anchor="middle" transform="rotate(-90 992.0 176.0)">OPEN PANEL</text>
+<text class="dim" x="1024.0" y="20.0" text-anchor="end">260 x 88 mm - illustrative, connector faces not measured</text>
+</svg>
