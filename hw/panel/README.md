@@ -51,7 +51,7 @@ Side view, one slot:
   plug ▶▶▶▶▶▶ right-angle socket on a shelf ══════════════════════════╣ row 3
     │   │                                                           ║  ┌─ 2x5 ribbon ─┐
     │   │                                                           ║ ─┘              └─▶ [2x5]  backplane
-    │   │        ═══ standoff ═══                                   ║                     [USB3-A]  RP2040, hub
+    │   │        ═══ standoff ═══                                   ║                     [USB3-A]  RP2350B, hub
   ──┴───┴───────────────────────────────────────────────────────────╨──────────────────── rear rails
     |◀────────────────────────── 80 mm ───────────────────────────────────────────▶|
 ```
@@ -63,7 +63,7 @@ Side view, one slot:
 | **Card** | PCB parallel to the plate, as wide as its segment, full height: sockets on the front face, shifters on the back, a 2×5 box header for the ribbon | never for other modules' sake |
 | **Shelf** | small horizontal sub-board joined to the card at 90°, for sockets that only exist right-angle | per module |
 | **Standoffs** | four M3 female-female per cassette, length = that card's deepest socket | per module |
-| **Backplane** | vertical board on the rear rails: one SNAC port per slot as USB3-A socket and 2×5 header in parallel, RP2040s that speak the console protocols, the USB hub, 5 V in, host USB out, the button and display harness | never for a family's sake |
+| **Backplane** | vertical board on the rear rails: one SNAC port per slot as USB3-A socket and 2×5 header in parallel, two RP2350B that speak the console protocols, two USB hubs, 5 V in, host USB out, the button and display harness | never for a family's sake |
 | **Tray** | 3D-printed or bent sheet: front rails, rear rails, 80 mm apart | the panel width or depth changes |
 
 **One screw does everything.** At each of a cassette's four corners an M3
@@ -126,7 +126,7 @@ dongles use the socket.
 
 | Group | Spec |
 |---|---|
-| +5V | up to 1 A per port, polyfused on the backplane |
+| +5V | 500 mA polyfuse per port on the backplane |
 | IO1…IO7 | 3.3 V, **open-drain both ways, 10 kΩ pull-up to 3.3 V on the backplane**. This is exactly how the MiSTer FPGA drives its user port (`sys_top.v`: each `USER_IO` pin drives 0 or high-Z, verified this session), so a port behaves like one MiSTer user port |
 
 There is no 3.3 V supply on the port and no sense pin: a cassette that needs
