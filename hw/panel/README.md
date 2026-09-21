@@ -183,7 +183,7 @@ box, for adapters that live outside it.
 ### 3.5 Pass-through to a real MiSTer
 
 One backplane port can be routed by a jumper to an external USB3-A socket on
-the rear instead of to its RP2040. Plug that into the MiSTer's own user port
+the rear instead of to its RP2350B. Plug that into the MiSTer's own user port
 and the cassette on it is driven by the FPGA at zero latency, exactly as a
 SNAC adapter would be, while every other cassette goes through USB. This is
 the one place the `USER_IO` bit order matters.
