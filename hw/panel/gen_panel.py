@@ -9,7 +9,8 @@ replace the placeholder ones here, not in a .kicad_pcb.
 Outputs (all in this directory):
   frame.kicad_pcb           hidden FR4 skeleton the segments screw to
   seg_<name>.kicad_pcb      one visible panel segment each (aluminium-core PCB)
-  card_template.kicad_pcb   starting point for a module card (PCB parallel to the plate)
+  card_template.kicad_pcb   starting point for a cassette card (PCB parallel to the plate)
+  backplane.kicad_pcb       the rear board: one SNAC port per slot, 80 mm behind the plate
   preview.svg               the example assembly, drawn from the same tables
 
 Coordinates follow KiCad: millimetres, x to the right, y DOWN. The panel's
@@ -151,19 +152,25 @@ SEGMENTS = [seg_buttons(), seg_blank(1), seg_blank(2), seg_genesis_nes(),
 # The example assembly: segment names left to right. Must sum to SLOTS.
 ASSEMBLY = ["buttons", "genesis_nes", "saturn_snes", "psx_usb", "n64x4", "display"]
 
-# --------------------------------------------------------- module card
+# --------------------------------------------------------- cassette and backplane
 #
-# The card stands parallel to the plate, directly behind the frame, the full
-# width of its segment less 1 mm each side. Straight-mount sockets go on its
-# front face; right-angle sockets go on a small horizontal shelf sub-board
-# joined to the card at 90 degrees. The 2x8 right-angle header on its bottom
-# edge drops into the main board's socket for the module's leftmost slot.
-CARD_H = 75.0     # main-board surface to just under the top rail
-CARD_MARGIN = 1.0 # card edge inside the segment edge, each side
-CARD_ROWS = [y - (RAIL + 1.0) for y in ROWS]   # rows in card coordinates (top = panel y 9)
-HEADER_X = 5.0    # header pin 1 column from the slot's left edge; columns run +x
-HEADER_ROW1_Y = CARD_H - 4.0   # pad row nearest the bottom edge; row 2 is 2.54 further up
+# A cassette is a segment, the rails it screws through, four M3 standoffs and a
+# card parallel to the plate. The card carries the sockets on its front face
+# (straight-mount directly, right-angle ones on a horizontal shelf sub-board)
+# and its electronics on its back face, plus a 2x5 box header for the ribbon to
+# the backplane. The standoff length is the depth of the deepest socket on that
+# card, so every cassette's plug faces end up at the back of the plate.
+DEPTH = 80.0            # front plate to backplane front face
+CARD_MARGIN = 1.0       # card edge inside the segment edge, each side
+CARD_Y0 = 1.0           # card top edge in panel coordinates; it spans the full height
+CARD_H = HEIGHT - 2 * CARD_Y0
+CARD_ROWS = [y - CARD_Y0 for y in ROWS]
 CARD_TEMPLATE_SLOTS = 2
+RIBBON = dict(cols=5, rows=2, pitch=2.54, shroud=(15.2, 8.9))   # 2x5 box header, IDC ribbon
+BP_USB_Y = 28.0         # backplane: USB3-A socket row centre (SNAC port)
+BP_IDC_Y = 52.0         # backplane: 2x5 box header row centre (same port, ribbon)
+BP_SNAC_SLOTS = range(2, SLOTS)   # slots that get a SNAC port; 0 and 1 are the buttons
+BP_HUB_HEADERS = 4      # 1x4 USB headers for USB sections (hub downstream ports)
 
 
 # ============================================================ KiCad writer
@@ -227,28 +234,61 @@ class Board:
         self.line(x, y2 - r, x, y + r, layer)
         self.arc(x, y + r, x + c, y + c, x + r, y, layer)
 
-    def footprint_header_2x08_horizontal(self, ref, x, y):
-        """2x8 2.54 mm right-angle male header whose pins exit the card's bottom edge (+y).
-        Pin 1 at (x, y); columns run +x, row 2 is 2.54 mm further from the edge (-y).
-        Pads only; the body outline is on F.Fab. Exact pad-to-edge distance is set with
-        the chosen header's datasheet when the main board is drawn."""
-        pads = []
-        for col in range(8):
-            for row in range(2):
-                n = col * 2 + row + 1
-                px, py = x + col * 2.54, y - row * 2.54
-                shape = "rect" if n == 1 else "oval"
-                pads.append(f'    (pad "{n}" thru_hole {shape} (at {f(px - x)} {f(py - y)}) (size 1.7 1.7) '
-                            f'(drill 1.0) (layers "*.Cu" "*.Mask") (remove_unused_layers no) {U()})')
-        body = (f'    (fp_rect (start -1.27 -3.81) (end {f(7 * 2.54 + 1.27)} 1.27) '
-                f'(stroke (width 0.1) (type default)) (fill none) (layer "F.Fab") {U()})')
+    def _fp(self, name, ref, value, x, y, rot, layer, body, pads, ref_at=(0, -6)):
         self.items.append(
-            f'  (footprint "panel:PinHeader_2x08_P2.54mm_Horizontal_Edge" (layer "F.Cu") {U()} (at {f(x)} {f(y)})\n'
-            f'    (property "Reference" "{ref}" (at 8.89 -6 0) (layer "F.SilkS") {U()} '
+            f'  (footprint "panel:{name}" (layer "{layer}") {U()} (at {f(x)} {f(y)} {rot})\n'
+            f'    (property "Reference" "{ref}" (at {f(ref_at[0])} {f(ref_at[1])} 0) (layer "{"B" if layer == "B.Cu" else "F"}.SilkS") {U()} '
             f'(effects (font (size 1 1) (thickness 0.15))))\n'
-            f'    (property "Value" "SLOT" (at 8.89 3 0) (layer "F.Fab") {U()} '
+            f'    (property "Value" "{value}" (at 0 3 0) (layer "{"B" if layer == "B.Cu" else "F"}.Fab") {U()} '
             f'(effects (font (size 1 1) (thickness 0.15))))\n'
-            f'    (attr through_hole)\n' + body + "\n" + "\n".join(pads) + "\n  )")
+            f'    (attr through_hole)\n' + "\n".join(body) + "\n" + "\n".join(pads) + "\n  )")
+
+    def footprint_box_header(self, ref, value, x, y, cols=5, rows=2, pitch=2.54, shroud=(15.2, 8.9),
+                             layer="F.Cu", rot=0):
+        """Straight shrouded pin header, pin 1 at the footprint origin, columns +x, rows +y.
+        Shroud outline centred on the pin field; key notch on the pin-1 side."""
+        pads = []
+        for c in range(cols):
+            for r in range(rows):
+                n = c * rows + r + 1
+                shape = "rect" if n == 1 else "oval"
+                pads.append(f'    (pad "{n}" thru_hole {shape} (at {f(c * pitch)} {f(r * pitch)}) (size 1.7 1.7) '
+                            f'(drill 1.0) (layers "*.Cu" "*.Mask") (remove_unused_layers no) {U()})')
+        cx, cy = (cols - 1) * pitch / 2, (rows - 1) * pitch / 2
+        sw, sh = shroud
+        fab = "B.Fab" if layer == "B.Cu" else "F.Fab"
+        body = [f'    (fp_rect (start {f(cx - sw / 2)} {f(cy - sh / 2)}) (end {f(cx + sw / 2)} {f(cy + sh / 2)}) '
+                f'(stroke (width 0.1) (type default)) (fill none) (layer "{fab}") {U()})',
+                f'    (fp_rect (start {f(cx - 2)} {f(cy - sh / 2 - 0.4)}) (end {f(cx + 2)} {f(cy - sh / 2)}) '
+                f'(stroke (width 0.1) (type default)) (fill none) (layer "{fab}") {U()})']
+        self._fp(f"BoxHeader_{cols}x{rows:02d}_P{pitch}mm", ref, value, x, y, rot, layer, body, pads,
+                 ref_at=(cx, cy - sh / 2 - 1.5))
+
+    def footprint_pin_header(self, ref, value, x, y, n=4, layer="F.Cu", rot=0):
+        pads = [f'    (pad "{i + 1}" thru_hole {"rect" if i == 0 else "oval"} (at {f(i * 2.54)} 0) (size 1.7 1.7) '
+                f'(drill 1.0) (layers "*.Cu" "*.Mask") (remove_unused_layers no) {U()})' for i in range(n)]
+        body = [f'    (fp_rect (start -1.27 -1.27) (end {f((n - 1) * 2.54 + 1.27)} 1.27) '
+                f'(stroke (width 0.1) (type default)) (fill none) (layer "F.Fab") {U()})']
+        self._fp(f"PinHeader_1x{n:02d}_P2.54mm", ref, value, x, y, rot, layer, body, pads, ref_at=((n - 1) * 1.27, -2.5))
+
+    def footprint_usb3a_placeholder(self, ref, x, y):
+        """USB 3.0 A right-angle receptacle, PLACEHOLDER: nine signal pads in two rows and
+        a body outline of roughly the right size. Replace with the vendor footprint before
+        routing; only the position and the pin names are meant to survive."""
+        pads = []
+        names = ["VBUS", "D-", "D+", "GND", "SSRX-", "SSRX+", "GND_DRAIN", "SSTX-", "SSTX+"]
+        for i, xx in enumerate((-3.75, -1.25, 1.25, 3.75)):
+            pads.append(f'    (pad "{i + 1}" thru_hole {"rect" if i == 0 else "circle"} (at {f(xx)} 0) (size 1.6 1.6) '
+                        f'(drill 0.95) (layers "*.Cu" "*.Mask") (remove_unused_layers no) {U()})')
+        for i, xx in enumerate((-4.0, -2.0, 0.0, 2.0, 4.0)):
+            pads.append(f'    (pad "{i + 5}" thru_hole circle (at {f(xx)} 2.6) (size 1.6 1.6) '
+                        f'(drill 0.95) (layers "*.Cu" "*.Mask") (remove_unused_layers no) {U()})')
+        for xx in (-6.6, 6.6):
+            pads.append(f'    (pad "S" thru_hole oval (at {f(xx)} 1.3) (size 2.2 3.0) (drill oval 1.2 2.0) '
+                        f'(layers "*.Cu" "*.Mask") (remove_unused_layers no) {U()})')
+        body = [f'    (fp_rect (start -7.3 -13.5) (end 7.3 4.0) (stroke (width 0.1) (type default)) (fill none) (layer "F.Fab") {U()})',
+                f'    (fp_text user "USB3-A placeholder" (at 0 -6 0) (layer "F.Fab") {U()} (effects (font (size 0.9 0.9) (thickness 0.15))))']
+        self._fp("USB3_A_Receptacle_Horizontal_PLACEHOLDER", ref, "SNAC", x, y, 0, "F.Cu", body, pads, ref_at=(0, 6))
 
     def write(self, path):
         layers = [
@@ -409,24 +449,63 @@ def build_frame():
     return b
 
 
+def card_holes(w):
+    """Standoff holes: the segment's screw pattern, shifted by the card margin."""
+    return [(SCREW_INSET - CARD_MARGIN, RAIL / 2 - CARD_Y0), (w - SCREW_INSET + CARD_MARGIN, RAIL / 2 - CARD_Y0),
+            (SCREW_INSET - CARD_MARGIN, HEIGHT - RAIL / 2 - CARD_Y0), (w - SCREW_INSET + CARD_MARGIN, HEIGHT - RAIL / 2 - CARD_Y0)]
+
+
 def build_card_template():
     n = CARD_TEMPLATE_SLOTS
     w = n * PITCH - 2 * CARD_MARGIN
-    b = Board(f"module card template ({n} slot, parallel to the plate, viewed from the front)")
-    # x: along the panel, card's left edge at x=0 (= slot left edge + CARD_MARGIN)
-    # y: down, top edge y=0 is 1 mm under the top rail, bottom edge on the main board
+    b = Board(f"cassette card template ({n} slot, parallel to the plate, viewed from the front)")
+    # x: along the panel, card's left edge at x=0 (= segment left edge + CARD_MARGIN)
+    # y: down, top edge y=0 is CARD_Y0 below the panel's top edge; same height as the panel less margins
     b.rrect(0, 0, w, CARD_H, 1.0)
+    for hx, hy in card_holes(w):
+        b.circle(hx, hy, SCREW_D)
     for i, y in enumerate(CARD_ROWS):
         b.line(0, y, w, y, "Cmts.User", 0.1)
         b.text(f"row {i + 1} centre (panel y {f(ROWS[i])})", 2, y - 1.2, 1.0, "Cmts.User", justify="left")
     for k in range(1, n):
         x = k * PITCH - CARD_MARGIN
         b.line(x, 0, x, CARD_H, "Cmts.User", 0.1)
-        b.text(f"slot boundary", x, -1.5, 0.9, "Cmts.User")
-    b.footprint_header_2x08_horizontal("J1", HEADER_X - CARD_MARGIN, HEADER_ROW1_Y)
+        b.text("slot boundary", x, -1.5, 0.9, "Cmts.User")
+    # ribbon header on the BACK face, top centre, between the standoffs
+    hx = w / 2 - (RIBBON["cols"] - 1) * RIBBON["pitch"] / 2
+    b.footprint_box_header("J1", "RIBBON", hx, 3.0, layer="B.Cu", **RIBBON)
     b.text("front face: straight sockets here; right-angle sockets on a horizontal shelf sub-board", w / 2, -4, 1.2, "Cmts.User")
-    b.text("bottom edge rests on the main board; J1 pins exit downward into the slot's 2x8 socket", w / 2, CARD_H + 3, 1.2, "Cmts.User")
-    b.text("J1 pin 1 = +5V (README, slot pinout); header sits in the module's leftmost slot", HEADER_X - CARD_MARGIN + 20, HEADER_ROW1_Y + 5.5, 1.0, "Cmts.User", justify="left")
+    b.text("corner holes: M3 standoffs to the rails, length = deepest socket on this card", w / 2, CARD_H + 3, 1.2, "Cmts.User")
+    b.text("J1 on the back face: 2x5 box header, ribbon to the backplane; pin 1 = +5V (README)", w / 2, 11.5, 1.0, "Cmts.User")
+    return b
+
+
+def build_backplane():
+    W = SLOTS * PITCH
+    b = Board(f"backplane, {SLOTS} slots, {f(W)} x {f(HEIGHT)} mm, {f(DEPTH)} mm behind the plate, viewed from the front")
+    b.rrect(0, 0, W, HEIGHT, CORNER_R)
+    for hx, hy in frame_holes():
+        b.circle(hx, hy, SCREW_D)
+    for k in BP_SNAC_SLOTS:
+        cx = k * PITCH + PITCH / 2
+        port = k - BP_SNAC_SLOTS.start + 1
+        b.footprint_usb3a_placeholder(f"J{port}", cx, BP_USB_Y)
+        hx = cx - (RIBBON["cols"] - 1) * RIBBON["pitch"] / 2
+        b.footprint_box_header(f"J{port + 20}", f"SNAC{port}", hx, BP_IDC_Y - RIBBON["pitch"] / 2, **RIBBON)
+        b.text(f"SNAC {port}", cx, 12, 1.5)
+        b.line(k * PITCH, RAIL, k * PITCH, HEIGHT - RAIL, "Cmts.User", 0.1)
+    # slot 0-1 zone: buttons and display harness
+    b.footprint_box_header("J30", "HARNESS", 12.0, 24.0, cols=8, rows=2, shroud=(22.8, 8.9))
+    b.text("buttons + OLED harness to the host", PITCH, 14, 1.2)
+    # hub headers for USB sections, along the bottom strip
+    for i in range(BP_HUB_HEADERS):
+        b.footprint_pin_header(f"J{40 + i}", f"USB{i + 1}", 60.0 + i * 16.0, HEIGHT - 12.0, n=4)
+    b.text("hub downstream ports for USB sections (VBUS D- D+ GND)", 60.0, HEIGHT - 16.5, 1.0, justify="left")
+    b.text("MCU / hub / power zone: RP2040 per four SNAC ports, USB hub, 5 V in, host USB out on the back face",
+           W - 4, HEIGHT - 14, 1.0, "Cmts.User", justify="right")
+    b.text(f"backplane  {f(W)} x {f(HEIGHT)} mm, front face toward the cassettes, {f(DEPTH)} mm behind the plate; "
+           f"same M3 pattern as the frame, into the rear rails", W / 2, -5, 1.5, "Cmts.User")
+    b.text("USB3-A footprints are placeholders: replace with the vendor part before routing", W / 2, HEIGHT + 4, 1.5, "Cmts.User")
     return b
 
 
@@ -484,12 +563,13 @@ def main():
         build_segment(seg).write(HERE / f"seg_{seg['name']}.kicad_pcb")
     build_frame().write(HERE / "frame.kicad_pcb")
     build_card_template().write(HERE / "card_template.kicad_pcb")
+    build_backplane().write(HERE / "backplane.kicad_pcb")
     preview_svg(HERE / "preview.svg")
     pro = HERE / "panel.kicad_pro"
     if not pro.exists():
         pro.write_text('{\n  "meta": { "filename": "panel.kicad_pro", "version": 1 },\n'
                        '  "pcbnew": { "page_layout_descr_file": "" }\n}\n')
-    print(f"wrote frame, {len(SEGMENTS)} segments, card template, preview.svg")
+    print(f"wrote frame, {len(SEGMENTS)} segments, card template, backplane, preview.svg")
 
 
 if __name__ == "__main__":
