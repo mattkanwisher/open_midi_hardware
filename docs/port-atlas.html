@@ -1,0 +1,941 @@
+<title>Controller Port Atlas</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #eceef1; --panel: #f7f8fa; --ink: #191c21; --muted: #5a6370; --line: #c9ced6;
+  --accent: #1f6fd1; --ok: #2b8a4e; --warn: #b06a10; --no: #b8382f;
+  --shell: #101214; --flange: #d9dce2;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141517; --panel: #1d1f23; --ink: #e9e7e0; --muted: #a0a4ab; --line: #363a41;
+    --accent: #6eb0ff; --ok: #5ccc82; --warn: #e5a03a; --no: #f0776c; --shell: #060708; --flange: #2b2e34;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141517; --panel: #1d1f23; --ink: #e9e7e0; --muted: #a0a4ab; --line: #363a41;
+  --accent: #6eb0ff; --ok: #5ccc82; --warn: #e5a03a; --no: #f0776c; --shell: #060708; --flange: #2b2e34;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 15px; line-height: 1.5; margin: 0; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 32px 64px; padding-inline: 20px; }
+h1, h2, h3 { font-family: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 46px); font-weight: 600; letter-spacing: -0.01em; line-height: 1.05; }
+h2 { font-size: 24px; font-weight: 600; margin-top: 48px; margin-bottom: 12px; padding-top: 12px; border-top: 2px solid var(--ink); }
+h3 { font-size: 19px; font-weight: 600; }
+.eyebrow { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+p { max-width: 68ch; }
+.lede { font-size: 17px; max-width: 70ch; margin-top: 12px; }
+.muted { color: var(--muted); }
+.mono, .num, td.num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+a { color: var(--accent); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 18px; margin-top: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 8px; }
+.card figure { margin: 0; }
+.card figcaption { display: none; }
+.card .systems { font-size: 13.5px; color: var(--muted); margin: 0; }
+.card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin: 4px 0 0; font-size: 13.5px; }
+.card dl div { display: flex; flex-direction: column; }
+.card dt { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.card dd { margin: 0; }
+.card .note { font-size: 13.5px; margin: 4px 0 0; }
+.chip { display: inline-block; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11.5px; padding: 1px 7px; border-radius: 3px; border: 1px solid currentColor; }
+.chip.ok { color: var(--ok); } .chip.warn { color: var(--warn); } .chip.no { color: var(--no); }
+svg.face { width: 100%; max-width: 100%; height: auto; display: block; background: var(--panel); color: var(--ink); }
+svg.face .flange { fill: var(--flange); stroke: currentColor; stroke-width: 0.6; }
+svg.face .shell { fill: var(--shell); stroke: currentColor; stroke-width: 0.8; }
+svg.face .hole { fill: var(--panel); stroke: currentColor; stroke-width: 0.6; }
+svg.face .pinhole { fill: var(--panel); stroke: currentColor; stroke-width: 0.5; }
+svg.face .pin { font: 500 6px "IBM Plex Mono", ui-monospace, monospace; fill: currentColor; }
+svg.face .dim { font: 5.2px "IBM Plex Mono", ui-monospace, monospace; fill: var(--muted); }
+svg.face .bar { stroke: currentColor; stroke-width: 1.2; }
+svg.face .key { stroke: var(--flange); stroke-width: 1.2; }
+svg.face .key2 { fill: var(--flange); }
+svg.face .tongue { fill: #d8d8d2; stroke: none; }
+svg.face .tongue3 { fill: #2a6fd6; stroke: none; }
+svg.face .contact { fill: #c9a23a; stroke: none; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; }
+.budgetbox { background: var(--panel); border: 1px solid var(--line); padding: 14px 16px; }
+.budgetbox h3 { margin-bottom: 6px; }
+svg.budget { width: 100%; height: auto; display: block; color: var(--ink); }
+svg.budget .axis { stroke: currentColor; stroke-width: 1; }
+svg.budget .tick, svg.budget .key, svg.budget .sum { font: 11px "IBM Plex Mono", ui-monospace, monospace; fill: currentColor; }
+svg.budget .sum { font-weight: 500; font-size: 12px; }
+svg.budget .lbl { font: 500 10px "IBM Plex Mono", ui-monospace, monospace; fill: #fff; }
+svg.budget .seg0 { fill: #3d6fb5; } svg.budget .seg1 { fill: #6d8fc5; }
+svg.budget .limit { stroke: var(--no); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.verdict { border-left: 4px solid var(--accent); padding: 6px 14px; margin-top: 18px; background: var(--panel); }
+.verdict p { margin: 6px 0; }
+.tablewrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--line); background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 900px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 500; position: sticky; top: env(safe-area-inset-top, 0px); background: var(--panel); }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.filters button { font: 500 13px "IBM Plex Mono", ui-monospace, monospace; padding: 5px 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; border-radius: 3px; }
+.filters button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+ul.plain { padding-left: 18px; max-width: 70ch; }
+.foot { margin-top: 40px; font-size: 13.5px; color: var(--muted); max-width: 70ch; }
+@media (max-width: 720px) { .two { grid-template-columns: 1fr; } .card dl { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: no-preference) { .filters button { transition: border-color .15s, color .15s; } }
+</style>
+<div class="wrap">
+<p class="eyebrow">hw/panel reference · controller ports 1977 to 2026</p>
+<h1>Controller Port Atlas</h1>
+<p class="lede">Every controller port a retro front panel might carry, drawn to one scale, with what each needs from the panel: how wide a segment, how deep a cassette, how many lines, and whether a passive SNAC-style section can carry it or the section needs its own microcontroller. Systems that never had a wired port are listed so nobody looks for one.</p>
+<p class="muted">Every dimension on this page is a from-memory estimate written down to be replaced by a measurement. The drawings are the shape and pin count as commonly charted; pin numbering is as the usual pinout tables give it and must be checked on the real part before wiring anything.</p>
+
+<h2>Does 80 mm fit them all?</h2>
+<p>Yes. The deepest socket bodies here are the GameCube, Dreamcast and original Xbox at about 25 mm behind the plate. With a ribbon to the backplane the cassette stack uses 63.2 of 80 mm at the worst socket; with a USB3 pigtail standing straight off the backplane it uses 79.2, which is why our own sections should use the ribbon and leave the USB3 sockets for commercial SNAC dongles that arrive with a pigtail anyway. 18 of 18 connectors fit with the ribbon; none exceed it.</p>
+<div class="two">
+  <div class="budgetbox"><h3>Ribbon to the backplane</h3><svg role="img" aria-label="Cassette depth budget with a ribbon cable: 63 of 80 mm used" viewBox="0 0 460 170" class="budget">
+<line class="axis" x1="40" y1="30" x2="420" y2="30"/>
+<line class="axis" x1="40" y1="26" x2="40" y2="34"/>
+<text class="tick" x="40" y="20" text-anchor="middle">0</text>
+<line class="axis" x1="135" y1="26" x2="135" y2="34"/>
+<text class="tick" x="135" y="20" text-anchor="middle">20</text>
+<line class="axis" x1="230" y1="26" x2="230" y2="34"/>
+<text class="tick" x="230" y="20" text-anchor="middle">40</text>
+<line class="axis" x1="325" y1="26" x2="325" y2="34"/>
+<text class="tick" x="325" y="20" text-anchor="middle">60</text>
+<line class="axis" x1="420" y1="26" x2="420" y2="34"/>
+<text class="tick" x="420" y="20" text-anchor="middle">80</text>
+<text class="tick" x="426" y="34" text-anchor="start">mm</text>
+<rect class="seg0" x="40.0" y="44" width="15.2" height="16"/>
+<rect class="seg1" x="55.2" y="44" width="118.8" height="16"/>
+<text class="lbl" x="114.6" y="56" text-anchor="middle">25</text>
+<rect class="seg0" x="173.9" y="44" width="38.0" height="16"/>
+<text class="lbl" x="192.9" y="56" text-anchor="middle">8</text>
+<rect class="seg1" x="211.9" y="44" width="57.0" height="16"/>
+<text class="lbl" x="240.4" y="56" text-anchor="middle">12</text>
+<rect class="seg0" x="268.9" y="44" width="71.2" height="16"/>
+<text class="lbl" x="304.6" y="56" text-anchor="middle">15</text>
+<line class="limit" x1="420" y1="26" x2="420" y2="70"/>
+<text class="sum" x="40" y="86" text-anchor="start">63.2 of 80 mm used, 16.8 mm spare</text>
+<rect class="seg0" x="40" y="95" width="10" height="10"/>
+<text class="key" x="56" y="104" text-anchor="start">front plate: segment + frame: 3.2 mm</text>
+<rect class="seg1" x="40" y="109" width="10" height="10"/>
+<text class="key" x="56" y="118" text-anchor="start">deepest socket body behind the plate: 25 mm</text>
+<rect class="seg0" x="40" y="123" width="10" height="10"/>
+<text class="key" x="56" y="132" text-anchor="start">card and parts on its back: 8 mm</text>
+<rect class="seg1" x="40" y="137" width="10" height="10"/>
+<text class="key" x="56" y="146" text-anchor="start">2x5 IDC header and plug: 12 mm</text>
+<rect class="seg0" x="40" y="151" width="10" height="10"/>
+<text class="key" x="56" y="160" text-anchor="start">ribbon bend to the backplane: 15 mm</text>
+</svg></div>
+  <div class="budgetbox"><h3>USB3 pigtail to the backplane</h3><svg role="img" aria-label="Cassette depth budget with a USB3 pigtail: 79 of 80 mm used" viewBox="0 0 460 184" class="budget">
+<line class="axis" x1="40" y1="30" x2="420" y2="30"/>
+<line class="axis" x1="40" y1="26" x2="40" y2="34"/>
+<text class="tick" x="40" y="20" text-anchor="middle">0</text>
+<line class="axis" x1="135" y1="26" x2="135" y2="34"/>
+<text class="tick" x="135" y="20" text-anchor="middle">20</text>
+<line class="axis" x1="230" y1="26" x2="230" y2="34"/>
+<text class="tick" x="230" y="20" text-anchor="middle">40</text>
+<line class="axis" x1="325" y1="26" x2="325" y2="34"/>
+<text class="tick" x="325" y="20" text-anchor="middle">60</text>
+<line class="axis" x1="420" y1="26" x2="420" y2="34"/>
+<text class="tick" x="420" y="20" text-anchor="middle">80</text>
+<text class="tick" x="426" y="34" text-anchor="start">mm</text>
+<rect class="seg0" x="40.0" y="44" width="15.2" height="16"/>
+<rect class="seg1" x="55.2" y="44" width="118.8" height="16"/>
+<text class="lbl" x="114.6" y="56" text-anchor="middle">25</text>
+<rect class="seg0" x="173.9" y="44" width="38.0" height="16"/>
+<text class="lbl" x="192.9" y="56" text-anchor="middle">8</text>
+<rect class="seg1" x="211.9" y="44" width="38.0" height="16"/>
+<text class="lbl" x="230.9" y="56" text-anchor="middle">8</text>
+<rect class="seg0" x="249.9" y="44" width="95.0" height="16"/>
+<text class="lbl" x="297.4" y="56" text-anchor="middle">20</text>
+<rect class="seg1" x="344.9" y="44" width="71.2" height="16"/>
+<text class="lbl" x="380.6" y="56" text-anchor="middle">15</text>
+<line class="limit" x1="420" y1="26" x2="420" y2="70"/>
+<text class="sum" x="40" y="86" text-anchor="start">79.2 of 80 mm used, 0.8 mm spare</text>
+<rect class="seg0" x="40" y="95" width="10" height="10"/>
+<text class="key" x="56" y="104" text-anchor="start">front plate: segment + frame: 3.2 mm</text>
+<rect class="seg1" x="40" y="109" width="10" height="10"/>
+<text class="key" x="56" y="118" text-anchor="start">deepest socket body behind the plate: 25 mm</text>
+<rect class="seg0" x="40" y="123" width="10" height="10"/>
+<text class="key" x="56" y="132" text-anchor="start">card and parts on its back: 8 mm</text>
+<rect class="seg1" x="40" y="137" width="10" height="10"/>
+<text class="key" x="56" y="146" text-anchor="start">side-facing USB3-A socket on the card: 8 mm</text>
+<rect class="seg0" x="40" y="151" width="10" height="10"/>
+<text class="key" x="56" y="160" text-anchor="start">USB3-A plug standing off the backplane: 20 mm</text>
+<rect class="seg1" x="40" y="165" width="10" height="10"/>
+<text class="key" x="56" y="174" text-anchor="start">pigtail bend: 15 mm</text>
+</svg></div>
+</div>
+<div class="verdict">
+  <p><strong>Rule for the rails:</strong> 80 mm front plate to backplane. A socket may be up to 25 mm deep behind the plate, which every port below satisfies; 30 mm would still fit with a ribbon.</p>
+  <p><strong>Rule for the width:</strong> any port with a plug opening or socket body over 22 mm takes a two-slot segment (50 mm). D-subs, SNES, Saturn, PlayStation and Dreamcast are two-slot; NES, N64, GameCube, the round DINs and USB are one-slot and stack four high.</p>
+</div>
+
+<h2>The connectors</h2>
+<p>Face views at a shared scale, 10 mm bar in each. "Passive SNAC section" means a section with sockets and level shifters only, seven IO lines to the backplane in SNAC order, and the backplane's MCU speaking the protocol. Anything analogue, anything with more than seven lines and anything that is really USB needs a section with its own MCU on the hub instead.</p>
+<div class="grid">
+
+<article class="card" id="c-de9">
+  <figure><svg role="img" aria-label="DE-9, D-sub 9 face, male on the machine" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="43.0" y="31.2" width="154.0" height="62.5" rx="5.0"/>
+<path class="shell" d="M 82.5 41.2 L 157.5 41.2 Q 162.5 41.2 162.5 46.2 L 155.0 78.8 Q 153.5 83.8 148.5 83.8 L 91.5 83.8 Q 86.5 83.8 85.0 78.8 L 77.5 46.2 Q 77.5 41.2 82.5 41.2 Z"/>
+<circle class="hole" cx="57.5" cy="62.5" r="7.8"/>
+<circle class="hole" cx="182.5" cy="62.5" r="7.8"/>
+<circle class="pinhole" cx="92.3" cy="55.0" r="5.5"/>
+<text class="pin" x="92.3" y="57.8" text-anchor="middle">1</text>
+<circle class="pinhole" cx="106.2" cy="55.0" r="5.5"/>
+<text class="pin" x="106.2" y="57.8" text-anchor="middle">2</text>
+<circle class="pinhole" cx="120.0" cy="55.0" r="5.5"/>
+<text class="pin" x="120.0" y="57.8" text-anchor="middle">3</text>
+<circle class="pinhole" cx="133.9" cy="55.0" r="5.5"/>
+<text class="pin" x="133.9" y="57.8" text-anchor="middle">4</text>
+<circle class="pinhole" cx="147.7" cy="55.0" r="5.5"/>
+<text class="pin" x="147.7" y="57.8" text-anchor="middle">5</text>
+<circle class="pinhole" cx="99.2" cy="70.0" r="5.5"/>
+<text class="pin" x="99.2" y="72.8" text-anchor="middle">6</text>
+<circle class="pinhole" cx="113.1" cy="70.0" r="5.5"/>
+<text class="pin" x="113.1" y="72.8" text-anchor="middle">7</text>
+<circle class="pinhole" cx="126.9" cy="70.0" r="5.5"/>
+<text class="pin" x="126.9" y="72.8" text-anchor="middle">8</text>
+<circle class="pinhole" cx="140.8" cy="70.0" r="5.5"/>
+<text class="pin" x="140.8" y="72.8" text-anchor="middle">9</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">male, pins, face view</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>DE-9, D-sub 9, male on the machine. Drawn at the shared scale.</figcaption></figure>
+  <h3>DE-9, D-sub 9</h3>
+  <p class="systems">Atari 2600 / 7800 / 8-bit, Commodore 64 / 128 / Amiga / CD32, MSX, Amstrad CPC, Master System, Mega Drive / Genesis, Atari ST, Sharp X68000, FM Towns, Apple II (analogue), ZX Spectrum +2/+3 (Sinclair pinout)</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>17 × 8.5 mm</dd></div>
+    <div><dt>Socket body</dt><dd>31 mm wide, 13 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>2 slots of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 28.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>up to 7 (Genesis uses all 7)</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes</span></dd></div>
+    <div><dt>Sourcing</dt><dd>catalogue part, right-angle or straight, with jack posts</dd></div>
+  </dl>
+  <p class="note">One shell, several pinouts. Atari, Sega and Commodore agree on U/D/L/R/GND/+5; Sinclair, Coleco and Apple do not. A section decides, the socket does not. Apple II is analogue: not SNAC.</p>
+</article>
+
+<article class="card" id="c-da15">
+  <figure><svg role="img" aria-label="DA-15, D-sub 15 face, female on the machine" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="22.2" y="31.2" width="195.5" height="62.5" rx="5.0"/>
+<path class="shell" d="M 61.2 41.2 L 178.8 41.2 Q 183.8 41.2 183.8 46.2 L 176.2 78.8 Q 174.8 83.8 169.8 83.8 L 70.2 83.8 Q 65.2 83.8 63.8 78.8 L 56.2 46.2 Q 56.2 41.2 61.2 41.2 Z"/>
+<circle class="hole" cx="36.8" cy="62.5" r="7.8"/>
+<circle class="hole" cx="203.2" cy="62.5" r="7.8"/>
+<circle class="pinhole" cx="71.5" cy="55.0" r="5.5"/>
+<text class="pin" x="71.5" y="57.8" text-anchor="middle">8</text>
+<circle class="pinhole" cx="85.4" cy="55.0" r="5.5"/>
+<text class="pin" x="85.4" y="57.8" text-anchor="middle">7</text>
+<circle class="pinhole" cx="99.2" cy="55.0" r="5.5"/>
+<text class="pin" x="99.2" y="57.8" text-anchor="middle">6</text>
+<circle class="pinhole" cx="113.1" cy="55.0" r="5.5"/>
+<text class="pin" x="113.1" y="57.8" text-anchor="middle">5</text>
+<circle class="pinhole" cx="126.9" cy="55.0" r="5.5"/>
+<text class="pin" x="126.9" y="57.8" text-anchor="middle">4</text>
+<circle class="pinhole" cx="140.8" cy="55.0" r="5.5"/>
+<text class="pin" x="140.8" y="57.8" text-anchor="middle">3</text>
+<circle class="pinhole" cx="154.6" cy="55.0" r="5.5"/>
+<text class="pin" x="154.6" y="57.8" text-anchor="middle">2</text>
+<circle class="pinhole" cx="168.5" cy="55.0" r="5.5"/>
+<text class="pin" x="168.5" y="57.8" text-anchor="middle">1</text>
+<circle class="pinhole" cx="78.5" cy="70.0" r="5.5"/>
+<text class="pin" x="78.5" y="72.8" text-anchor="middle">15</text>
+<circle class="pinhole" cx="92.3" cy="70.0" r="5.5"/>
+<text class="pin" x="92.3" y="72.8" text-anchor="middle">14</text>
+<circle class="pinhole" cx="106.2" cy="70.0" r="5.5"/>
+<text class="pin" x="106.2" y="72.8" text-anchor="middle">13</text>
+<circle class="pinhole" cx="120.0" cy="70.0" r="5.5"/>
+<text class="pin" x="120.0" y="72.8" text-anchor="middle">12</text>
+<circle class="pinhole" cx="133.8" cy="70.0" r="5.5"/>
+<text class="pin" x="133.8" y="72.8" text-anchor="middle">11</text>
+<circle class="pinhole" cx="147.7" cy="70.0" r="5.5"/>
+<text class="pin" x="147.7" y="72.8" text-anchor="middle">10</text>
+<circle class="pinhole" cx="161.6" cy="70.0" r="5.5"/>
+<text class="pin" x="161.6" y="72.8" text-anchor="middle">9</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female, sockets, face view</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>DA-15, D-sub 15, female on the machine. Drawn at the shared scale.</figcaption></figure>
+  <h3>DA-15, D-sub 15</h3>
+  <p class="systems">Neo Geo AES / CD, Atari Jaguar, Atari 5200, Atari STE enhanced ports, Famicom expansion, BBC Micro analogue, IBM PC game port</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>25.5 × 8.5 mm</dd></div>
+    <div><dt>Socket body</dt><dd>39 mm wide, 13 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>2 slots of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 28.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>9 to 13</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip no">no: too many lines, or analogue</span></dd></div>
+    <div><dt>Sourcing</dt><dd>catalogue part</dd></div>
+  </dl>
+  <p class="note">Neo Geo and Jaguar are digital but need more than seven lines; the PC game port is analogue and also carries MIDI on pins 12 and 15. All of them want a USB section with an MCU, not a passive one.</p>
+</article>
+
+<article class="card" id="c-nes">
+  <figure><svg role="img" aria-label="NES 7-pin face, female on the console" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="65.0" y="28.8" width="110.0" height="67.5" rx="5.0"/>
+<path class="shell" d="M 81.2 38.8 L 158.8 38.8 L 158.8 71.2 Q 158.8 86.2 143.8 86.2 L 96.2 86.2 Q 81.2 86.2 81.2 71.2 Z"/>
+<circle class="pinhole" cx="92.1" cy="62.5" r="5.8"/>
+<text class="pin" x="92.1" y="65.2" text-anchor="middle">1</text>
+<circle class="pinhole" cx="101.4" cy="62.5" r="5.8"/>
+<text class="pin" x="101.4" y="65.2" text-anchor="middle">2</text>
+<circle class="pinhole" cx="110.7" cy="62.5" r="5.8"/>
+<text class="pin" x="110.7" y="65.2" text-anchor="middle">3</text>
+<circle class="pinhole" cx="120.0" cy="62.5" r="5.8"/>
+<text class="pin" x="120.0" y="65.2" text-anchor="middle">4</text>
+<circle class="pinhole" cx="129.3" cy="62.5" r="5.8"/>
+<text class="pin" x="129.3" y="65.2" text-anchor="middle">5</text>
+<circle class="pinhole" cx="138.6" cy="62.5" r="5.8"/>
+<text class="pin" x="138.6" y="65.2" text-anchor="middle">6</text>
+<circle class="pinhole" cx="147.9" cy="62.5" r="5.8"/>
+<text class="pin" x="147.9" y="65.2" text-anchor="middle">7</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the console, face view</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>NES 7-pin, female on the console. Drawn at the shared scale.</figcaption></figure>
+  <h3>NES 7-pin</h3>
+  <p class="systems">NES</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>15.5 × 9.5 mm</dd></div>
+    <div><dt>Socket body</dt><dd>22 mm wide, 22 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 19.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>5 (CLK, LATCH, D0, D3, D4)</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes</span></dd></div>
+    <div><dt>Sourcing</dt><dd>console replacement part, several variants</dd></div>
+  </dl>
+  <p class="note">Shift register. D3 and D4 carry the Zapper and expansion pads.</p>
+</article>
+
+<article class="card" id="c-snes">
+  <figure><svg role="img" aria-label="SNES / SFC 7-pin face, female on the console" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="40.0" y="27.5" width="160.0" height="70.0" rx="5.0"/>
+<rect class="shell" x="45.0" y="37.5" width="150.0" height="50.0" rx="25.0"/>
+<circle class="pinhole" cx="60.5" cy="62.5" r="5.8"/>
+<text class="pin" x="60.5" y="65.2" text-anchor="middle">1</text>
+<circle class="pinhole" cx="79.0" cy="62.5" r="5.8"/>
+<text class="pin" x="79.0" y="65.2" text-anchor="middle">2</text>
+<circle class="pinhole" cx="97.5" cy="62.5" r="5.8"/>
+<text class="pin" x="97.5" y="65.2" text-anchor="middle">3</text>
+<circle class="pinhole" cx="116.0" cy="62.5" r="5.8"/>
+<text class="pin" x="116.0" y="65.2" text-anchor="middle">4</text>
+<line class="key" x1="125.2" y1="41.5" x2="125.2" y2="83.5"/>
+<circle class="pinhole" cx="142.5" cy="62.5" r="5.8"/>
+<text class="pin" x="142.5" y="65.2" text-anchor="middle">5</text>
+<circle class="pinhole" cx="161.0" cy="62.5" r="5.8"/>
+<text class="pin" x="161.0" y="65.2" text-anchor="middle">6</text>
+<circle class="pinhole" cx="179.5" cy="62.5" r="5.8"/>
+<text class="pin" x="179.5" y="65.2" text-anchor="middle">7</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the console, face view</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>SNES / SFC 7-pin, female on the console. Drawn at the shared scale.</figcaption></figure>
+  <h3>SNES / SFC 7-pin</h3>
+  <p class="systems">Super NES, Super Famicom</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>30 × 10 mm</dd></div>
+    <div><dt>Socket body</dt><dd>32 mm wide, 22 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>2 slots of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 19.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>4 (CLK, LATCH, DATA, IOBIT)</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes</span></dd></div>
+    <div><dt>Sourcing</dt><dd>console replacement part</dd></div>
+  </dl>
+  <p class="note">Same protocol as NES with 16 bits; the 4+3 split is the key.</p>
+</article>
+
+<article class="card" id="c-saturn">
+  <figure><svg role="img" aria-label="Saturn 9-pin face, female on the console" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="37.5" y="25.0" width="165.0" height="75.0" rx="5.0"/>
+<rect class="shell" x="45.0" y="35.0" width="150.0" height="55.0" rx="10.0"/>
+<circle class="pinhole" cx="58.9" cy="62.5" r="5.8"/>
+<text class="pin" x="58.9" y="65.2" text-anchor="middle">1</text>
+<circle class="pinhole" cx="74.2" cy="62.5" r="5.8"/>
+<text class="pin" x="74.2" y="65.2" text-anchor="middle">2</text>
+<circle class="pinhole" cx="89.4" cy="62.5" r="5.8"/>
+<text class="pin" x="89.4" y="65.2" text-anchor="middle">3</text>
+<circle class="pinhole" cx="104.7" cy="62.5" r="5.8"/>
+<text class="pin" x="104.7" y="65.2" text-anchor="middle">4</text>
+<circle class="pinhole" cx="120.0" cy="62.5" r="5.8"/>
+<text class="pin" x="120.0" y="65.2" text-anchor="middle">5</text>
+<circle class="pinhole" cx="135.3" cy="62.5" r="5.8"/>
+<text class="pin" x="135.3" y="65.2" text-anchor="middle">6</text>
+<circle class="pinhole" cx="150.6" cy="62.5" r="5.8"/>
+<text class="pin" x="150.6" y="65.2" text-anchor="middle">7</text>
+<circle class="pinhole" cx="165.8" cy="62.5" r="5.8"/>
+<text class="pin" x="165.8" y="65.2" text-anchor="middle">8</text>
+<circle class="pinhole" cx="181.1" cy="62.5" r="5.8"/>
+<text class="pin" x="181.1" y="65.2" text-anchor="middle">9</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the console, face view</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>Saturn 9-pin, female on the console. Drawn at the shared scale.</figcaption></figure>
+  <h3>Saturn 9-pin</h3>
+  <p class="systems">Sega Saturn</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>30 × 11 mm</dd></div>
+    <div><dt>Socket body</dt><dd>33 mm wide, 20 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>2 slots of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 21.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>6 (D0..D3, S0, S1)</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes</span></dd></div>
+    <div><dt>Sourcing</dt><dd>console replacement part, the hardest of the set to find</dd></div>
+  </dl>
+  <p class="note">Two select lines pick one of four nibbles. SNAC adapters for it exist.</p>
+</article>
+
+<article class="card" id="c-psx">
+  <figure><svg role="img" aria-label="PlayStation 9-pin face, female on the console" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="25.0" y="30.0" width="190.0" height="65.0" rx="5.0"/>
+<rect class="shell" x="35.0" y="40.0" width="170.0" height="45.0" rx="10.0"/>
+<circle class="pinhole" cx="49.1" cy="62.5" r="5.8"/>
+<text class="pin" x="49.1" y="65.2" text-anchor="middle">1</text>
+<circle class="pinhole" cx="64.8" cy="62.5" r="5.8"/>
+<text class="pin" x="64.8" y="65.2" text-anchor="middle">2</text>
+<circle class="pinhole" cx="80.6" cy="62.5" r="5.8"/>
+<text class="pin" x="80.6" y="65.2" text-anchor="middle">3</text>
+<circle class="pinhole" cx="96.3" cy="62.5" r="5.8"/>
+<text class="pin" x="96.3" y="65.2" text-anchor="middle">4</text>
+<circle class="pinhole" cx="112.0" cy="62.5" r="5.8"/>
+<text class="pin" x="112.0" y="65.2" text-anchor="middle">5</text>
+<circle class="pinhole" cx="127.7" cy="62.5" r="5.8"/>
+<text class="pin" x="127.7" y="65.2" text-anchor="middle">6</text>
+<circle class="pinhole" cx="143.4" cy="62.5" r="5.8"/>
+<text class="pin" x="143.4" y="65.2" text-anchor="middle">7</text>
+<circle class="pinhole" cx="159.2" cy="62.5" r="5.8"/>
+<text class="pin" x="159.2" y="65.2" text-anchor="middle">8</text>
+<circle class="pinhole" cx="174.9" cy="62.5" r="5.8"/>
+<text class="pin" x="174.9" y="65.2" text-anchor="middle">9</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the console, face view</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>PlayStation 9-pin, female on the console. Drawn at the shared scale.</figcaption></figure>
+  <h3>PlayStation 9-pin</h3>
+  <p class="systems">PlayStation, PlayStation 2</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>34 × 9 mm</dd></div>
+    <div><dt>Socket body</dt><dd>38 mm wide, 22 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>2 slots of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 19.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>3.3 V logic, 7.6 V motor</dd></div>
+    <div><dt>Lines</dt><dd>5 (DATA, CMD, ATT, CLK, ACK)</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes, with 3.3 V and 7.6 V made on the section</span></dd></div>
+    <div><dt>Sourcing</dt><dd>console replacement part, single and dual</dd></div>
+  </dl>
+  <p class="note">SPI-like at 250 kHz. The section needs a 3.3 V regulator and, for rumble, a 7.6 V boost; a SNAC port gives it 5 V only.</p>
+</article>
+
+<article class="card" id="c-n64">
+  <figure><svg role="img" aria-label="N64 3-pin face, female on the console" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="65.0" y="20.0" width="110.0" height="85.0" rx="5.0"/>
+<path class="shell" d="M 80.0 95.0 L 80.0 60.0 Q 80.0 30.0 110.0 30.0 L 130.0 30.0 Q 160.0 30.0 160.0 60.0 L 160.0 95.0 Z"/>
+<circle class="pinhole" cx="97.5" cy="62.5" r="5.8"/>
+<text class="pin" x="97.5" y="65.2" text-anchor="middle">1</text>
+<circle class="pinhole" cx="120.0" cy="62.5" r="5.8"/>
+<text class="pin" x="120.0" y="65.2" text-anchor="middle">2</text>
+<circle class="pinhole" cx="142.5" cy="62.5" r="5.8"/>
+<text class="pin" x="142.5" y="65.2" text-anchor="middle">3</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the console, face view</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>N64 3-pin, female on the console. Drawn at the shared scale.</figcaption></figure>
+  <h3>N64 3-pin</h3>
+  <p class="systems">Nintendo 64</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>16 × 13 mm</dd></div>
+    <div><dt>Socket body</dt><dd>22 mm wide, 17 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 24.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>3.3 V</dd></div>
+    <div><dt>Lines</dt><dd>1 (Joybus)</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes, four ports on one section</span></dd></div>
+    <div><dt>Sourcing</dt><dd>console replacement part</dd></div>
+  </dl>
+  <p class="note">One open-drain wire per pad, 4 µs per bit. A single seven-line section carries four ports with lines to spare.</p>
+</article>
+
+<article class="card" id="c-gc">
+  <figure><svg role="img" aria-label="GameCube face, female on the console" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="70.0" y="22.5" width="100.0" height="80.0" rx="5.0"/>
+<path class="shell" d="M 95.0 32.5 L 145.0 32.5 Q 155.0 32.5 155.0 42.5 L 155.0 67.5 Q 155.0 92.5 130.0 92.5 L 110.0 92.5 Q 85.0 92.5 85.0 67.5 L 85.0 42.5 Q 85.0 32.5 95.0 32.5 Z"/>
+<circle class="pinhole" cx="102.0" cy="51.5" r="5.8"/>
+<text class="pin" x="102.0" y="54.3" text-anchor="middle">1</text>
+<circle class="pinhole" cx="120.0" cy="51.5" r="5.8"/>
+<text class="pin" x="120.0" y="54.3" text-anchor="middle">2</text>
+<circle class="pinhole" cx="138.0" cy="51.5" r="5.8"/>
+<text class="pin" x="138.0" y="54.3" text-anchor="middle">3</text>
+<circle class="pinhole" cx="102.0" cy="73.5" r="5.8"/>
+<text class="pin" x="102.0" y="76.2" text-anchor="middle">4</text>
+<circle class="pinhole" cx="120.0" cy="73.5" r="5.8"/>
+<text class="pin" x="120.0" y="76.2" text-anchor="middle">5</text>
+<circle class="pinhole" cx="138.0" cy="73.5" r="5.8"/>
+<text class="pin" x="138.0" y="76.2" text-anchor="middle">6</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the console, face view; pin 7 is the cable shield</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>GameCube, female on the console. Drawn at the shared scale.</figcaption></figure>
+  <h3>GameCube</h3>
+  <p class="systems">GameCube, early Wii</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>14 × 12 mm</dd></div>
+    <div><dt>Socket body</dt><dd>20 mm wide, 25 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 16.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>3.3 V data, 5 V rumble</dd></div>
+    <div><dt>Lines</dt><dd>1 (Joybus)</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes</span></dd></div>
+    <div><dt>Sourcing</dt><dd>console replacement part</dd></div>
+  </dl>
+  <p class="note">Same bus as N64 at the same timing; the extra pins are 5 V for the rumble motor and a shield.</p>
+</article>
+
+<article class="card" id="c-dc">
+  <figure><svg role="img" aria-label="Dreamcast face, female on the console" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="35.0" y="30.0" width="170.0" height="65.0" rx="5.0"/>
+<path class="shell" d="M 45.0 85.0 L 45.0 52.5 Q 120.0 27.5 195.0 52.5 L 195.0 85.0 Z"/>
+<circle class="pinhole" cx="65.0" cy="62.5" r="5.8"/>
+<text class="pin" x="65.0" y="65.2" text-anchor="middle">1</text>
+<circle class="pinhole" cx="92.5" cy="62.5" r="5.8"/>
+<text class="pin" x="92.5" y="65.2" text-anchor="middle">2</text>
+<circle class="pinhole" cx="120.0" cy="62.5" r="5.8"/>
+<text class="pin" x="120.0" y="65.2" text-anchor="middle">3</text>
+<circle class="pinhole" cx="147.5" cy="62.5" r="5.8"/>
+<text class="pin" x="147.5" y="65.2" text-anchor="middle">4</text>
+<circle class="pinhole" cx="175.0" cy="62.5" r="5.8"/>
+<text class="pin" x="175.0" y="65.2" text-anchor="middle">5</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the console, face view</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>Dreamcast, female on the console. Drawn at the shared scale.</figcaption></figure>
+  <h3>Dreamcast</h3>
+  <p class="systems">Dreamcast</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>30 × 9 mm</dd></div>
+    <div><dt>Socket body</dt><dd>34 mm wide, 25 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>2 slots of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 16.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>2 (SDCKA, SDCKB) + sense</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes, timing permitting</span></dd></div>
+    <div><dt>Sourcing</dt><dd>console replacement part</dd></div>
+  </dl>
+  <p class="note">Maple bus: two lines clock each other at up to 2 Mbit/s. Fine over 10 cm; the MCU end wants PIO, not bit-banging.</p>
+</article>
+
+<article class="card" id="c-xbox">
+  <figure><svg role="img" aria-label="Xbox (original) face, female on the console" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="57.5" y="25.0" width="125.0" height="75.0" rx="5.0"/>
+<path class="shell" d="M 67.5 35.0 L 172.5 35.0 L 165.0 90.0 L 75.0 90.0 Z"/>
+<circle class="pinhole" cx="89.0" cy="62.5" r="5.8"/>
+<text class="pin" x="89.0" y="65.2" text-anchor="middle">1</text>
+<circle class="pinhole" cx="104.5" cy="62.5" r="5.8"/>
+<text class="pin" x="104.5" y="65.2" text-anchor="middle">2</text>
+<circle class="pinhole" cx="120.0" cy="62.5" r="5.8"/>
+<text class="pin" x="120.0" y="65.2" text-anchor="middle">3</text>
+<circle class="pinhole" cx="135.5" cy="62.5" r="5.8"/>
+<text class="pin" x="135.5" y="65.2" text-anchor="middle">4</text>
+<circle class="pinhole" cx="151.0" cy="62.5" r="5.8"/>
+<text class="pin" x="151.0" y="65.2" text-anchor="middle">5</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the console, face view</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>Xbox (original), female on the console. Drawn at the shared scale.</figcaption></figure>
+  <h3>Xbox (original)</h3>
+  <p class="systems">Xbox</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>18 × 11 mm</dd></div>
+    <div><dt>Socket body</dt><dd>25 mm wide, 25 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 16.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>USB 1.1 at 5 V</dd></div>
+    <div><dt>Lines</dt><dd>USB pair + video sync</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip no">no: it is USB</span></dd></div>
+    <div><dt>Sourcing</dt><dd>console replacement part; or a breakaway cable&#x27;s socket</dd></div>
+  </dl>
+  <p class="note">Electrically a USB port with a fifth wire for light guns. Belongs on the hub through a plain USB section, never on a SNAC port.</p>
+</article>
+
+<article class="card" id="c-mdin8">
+  <figure><svg role="img" aria-label="mini-DIN 8 face, female on the machine" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="86.2" y="28.8" width="67.5" height="67.5" rx="5.0"/>
+<circle class="shell" cx="120.0" cy="62.5" r="23.8"/>
+<rect class="key2" x="114.0" y="80.2" width="12.0" height="7.0" rx="0.0"/>
+<circle class="pinhole" cx="108.3" cy="50.6" r="5.5"/>
+<text class="pin" x="108.3" y="53.4" text-anchor="middle">6</text>
+<circle class="pinhole" cx="120.0" cy="50.6" r="5.5"/>
+<text class="pin" x="120.0" y="53.4" text-anchor="middle">7</text>
+<circle class="pinhole" cx="131.7" cy="50.6" r="5.5"/>
+<text class="pin" x="131.7" y="53.4" text-anchor="middle">8</text>
+<circle class="pinhole" cx="108.3" cy="62.5" r="5.5"/>
+<text class="pin" x="108.3" y="65.2" text-anchor="middle">3</text>
+<circle class="pinhole" cx="120.0" cy="62.5" r="5.5"/>
+<text class="pin" x="120.0" y="65.2" text-anchor="middle">4</text>
+<circle class="pinhole" cx="131.7" cy="62.5" r="5.5"/>
+<text class="pin" x="131.7" y="65.2" text-anchor="middle">5</text>
+<circle class="pinhole" cx="113.5" cy="74.4" r="5.5"/>
+<text class="pin" x="113.5" y="77.1" text-anchor="middle">1</text>
+<circle class="pinhole" cx="126.5" cy="74.4" r="5.5"/>
+<text class="pin" x="126.5" y="77.1" text-anchor="middle">2</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the machine, face view; numbering schematic</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>mini-DIN 8, female on the machine. Drawn at the shared scale.</figcaption></figure>
+  <h3>mini-DIN 8</h3>
+  <p class="systems">PC Engine / CoreGrafx / SuperGrafx, Philips CD-i, Commodore Plus/4 joystick</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>9.5 × 9.5 mm</dd></div>
+    <div><dt>Socket body</dt><dd>13 mm wide, 20 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 21.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>PC Engine 6; CD-i serial 2</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes</span></dd></div>
+    <div><dt>Sourcing</dt><dd>catalogue part</dd></div>
+  </dl>
+  <p class="note">Three different protocols in one shell. Two fit side by side in one slot only with a slim body; plan one per row.</p>
+</article>
+
+<article class="card" id="c-tg16">
+  <figure><svg role="img" aria-label="TurboGrafx-16 8-pin face, female on the console" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="78.8" y="21.2" width="82.5" height="82.5" rx="5.0"/>
+<circle class="shell" cx="120.0" cy="62.5" r="31.2"/>
+<rect class="key2" x="114.0" y="87.8" width="12.0" height="7.0" rx="0.0"/>
+<circle class="pinhole" cx="107.0" cy="46.9" r="5.5"/>
+<text class="pin" x="107.0" y="49.6" text-anchor="middle">1</text>
+<circle class="pinhole" cx="120.0" cy="46.9" r="5.5"/>
+<text class="pin" x="120.0" y="49.6" text-anchor="middle">2</text>
+<circle class="pinhole" cx="133.0" cy="46.9" r="5.5"/>
+<text class="pin" x="133.0" y="49.6" text-anchor="middle">3</text>
+<circle class="pinhole" cx="113.5" cy="62.5" r="5.5"/>
+<text class="pin" x="113.5" y="65.2" text-anchor="middle">4</text>
+<circle class="pinhole" cx="126.5" cy="62.5" r="5.5"/>
+<text class="pin" x="126.5" y="65.2" text-anchor="middle">5</text>
+<circle class="pinhole" cx="107.0" cy="78.1" r="5.5"/>
+<text class="pin" x="107.0" y="80.9" text-anchor="middle">6</text>
+<circle class="pinhole" cx="120.0" cy="78.1" r="5.5"/>
+<text class="pin" x="120.0" y="80.9" text-anchor="middle">7</text>
+<circle class="pinhole" cx="133.0" cy="78.1" r="5.5"/>
+<text class="pin" x="133.0" y="80.9" text-anchor="middle">8</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the console, face view; numbering schematic</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>TurboGrafx-16 8-pin, female on the console. Drawn at the shared scale.</figcaption></figure>
+  <h3>TurboGrafx-16 8-pin</h3>
+  <p class="systems">TurboGrafx-16, TurboDuo</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>12.5 × 12.5 mm</dd></div>
+    <div><dt>Socket body</dt><dd>16 mm wide, 22 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 19.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>6</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes</span></dd></div>
+    <div><dt>Sourcing</dt><dd>replacement part, uncommon</dd></div>
+  </dl>
+  <p class="note">Same signals as the PC Engine in a larger, incompatible round shell. Shell drawing approximate; pin arrangement unverified.</p>
+</article>
+
+<article class="card" id="c-mdin6">
+  <figure><svg role="img" aria-label="mini-DIN 6, PS/2 face, female on the machine" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="86.2" y="28.8" width="67.5" height="67.5" rx="5.0"/>
+<circle class="shell" cx="120.0" cy="62.5" r="23.8"/>
+<rect class="key2" x="114.0" y="80.2" width="12.0" height="7.0" rx="0.0"/>
+<circle class="pinhole" cx="113.5" cy="50.6" r="5.5"/>
+<text class="pin" x="113.5" y="53.4" text-anchor="middle">5</text>
+<circle class="pinhole" cx="126.5" cy="50.6" r="5.5"/>
+<text class="pin" x="126.5" y="53.4" text-anchor="middle">6</text>
+<circle class="pinhole" cx="113.5" cy="62.5" r="5.5"/>
+<text class="pin" x="113.5" y="65.2" text-anchor="middle">3</text>
+<circle class="pinhole" cx="126.5" cy="62.5" r="5.5"/>
+<text class="pin" x="126.5" y="65.2" text-anchor="middle">4</text>
+<circle class="pinhole" cx="113.5" cy="74.4" r="5.5"/>
+<text class="pin" x="113.5" y="77.1" text-anchor="middle">1</text>
+<circle class="pinhole" cx="126.5" cy="74.4" r="5.5"/>
+<text class="pin" x="126.5" y="77.1" text-anchor="middle">2</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the machine, face view; numbering schematic</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>mini-DIN 6, PS/2, female on the machine. Drawn at the shared scale.</figcaption></figure>
+  <h3>mini-DIN 6, PS/2</h3>
+  <p class="systems">IBM PS/2 and every PC until USB; keyboard and mouse</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>9.5 × 9.5 mm</dd></div>
+    <div><dt>Socket body</dt><dd>13 mm wide, 20 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 21.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>2 (CLK, DATA)</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes, but pointless</span></dd></div>
+    <div><dt>Sourcing</dt><dd>catalogue part, single and stacked</dd></div>
+  </dl>
+  <p class="note">For a panel that fronts a PC or MiSTer it is a keyboard port, which a USB section with an MCU converts; MiSTer also takes PS/2 through USB adapters.</p>
+</article>
+
+<article class="card" id="c-mdin4">
+  <figure><svg role="img" aria-label="mini-DIN 4, ADB face, female on the machine" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="86.2" y="28.8" width="67.5" height="67.5" rx="5.0"/>
+<circle class="shell" cx="120.0" cy="62.5" r="23.8"/>
+<rect class="key2" x="114.0" y="80.2" width="12.0" height="7.0" rx="0.0"/>
+<circle class="pinhole" cx="113.5" cy="54.6" r="5.5"/>
+<text class="pin" x="113.5" y="57.3" text-anchor="middle">3</text>
+<circle class="pinhole" cx="126.5" cy="54.6" r="5.5"/>
+<text class="pin" x="126.5" y="57.3" text-anchor="middle">4</text>
+<circle class="pinhole" cx="113.5" cy="70.4" r="5.5"/>
+<text class="pin" x="113.5" y="73.2" text-anchor="middle">1</text>
+<circle class="pinhole" cx="126.5" cy="70.4" r="5.5"/>
+<text class="pin" x="126.5" y="73.2" text-anchor="middle">2</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the machine, face view; numbering schematic</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>mini-DIN 4, ADB, female on the machine. Drawn at the shared scale.</figcaption></figure>
+  <h3>mini-DIN 4, ADB</h3>
+  <p class="systems">Apple IIGS, Macintosh SE through beige G3, Pippin, NeXT</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>9.5 × 9.5 mm</dd></div>
+    <div><dt>Socket body</dt><dd>13 mm wide, 20 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 21.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>1 (ADB)</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes, one line</span></dd></div>
+    <div><dt>Sourcing</dt><dd>catalogue part (same shell as S-Video)</dd></div>
+  </dl>
+  <p class="note">Apple Desktop Bus, one open-drain wire with a keyboard power line. ADB-to-USB converters on small MCUs exist.</p>
+</article>
+
+<article class="card" id="c-din5">
+  <figure><svg role="img" aria-label="DIN 5, 180° face, female on the machine" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="77.0" y="19.5" width="86.0" height="86.0" rx="5.0"/>
+<circle class="shell" cx="120.0" cy="62.5" r="33.0"/>
+<rect class="key2" x="114.0" y="89.5" width="12.0" height="7.0" rx="0.0"/>
+<circle class="pinhole" cx="120.0" cy="46.0" r="5.5"/>
+<text class="pin" x="120.0" y="48.8" text-anchor="middle">3</text>
+<circle class="pinhole" cx="113.5" cy="62.5" r="5.5"/>
+<text class="pin" x="113.5" y="65.2" text-anchor="middle">4</text>
+<circle class="pinhole" cx="126.5" cy="62.5" r="5.5"/>
+<text class="pin" x="126.5" y="65.2" text-anchor="middle">5</text>
+<circle class="pinhole" cx="113.5" cy="79.0" r="5.5"/>
+<text class="pin" x="113.5" y="81.7" text-anchor="middle">1</text>
+<circle class="pinhole" cx="126.5" cy="79.0" r="5.5"/>
+<text class="pin" x="126.5" y="81.7" text-anchor="middle">2</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">female on the machine, face view; numbering schematic</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>DIN 5, 180°, female on the machine. Drawn at the shared scale.</figcaption></figure>
+  <h3>DIN 5, 180°</h3>
+  <p class="systems">IBM PC/XT/AT keyboard, MSX keyboard on some models</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>13.2 × 13.2 mm</dd></div>
+    <div><dt>Socket body</dt><dd>17 mm wide, 22 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 19.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>2 (CLK, DATA)</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">yes, but pointless</span></dd></div>
+    <div><dt>Sourcing</dt><dd>catalogue part</dd></div>
+  </dl>
+  <p class="note">AT keyboard protocol is PS/2&#x27;s; same conversion. Pin arrangement drawn schematically.</p>
+</article>
+
+<article class="card" id="c-usba">
+  <figure><svg role="img" aria-label="USB-A face, receptacle on the machine" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="77.5" y="37.5" width="85.0" height="50.0" rx="5.0"/>
+<rect class="shell" x="87.5" y="47.5" width="65.0" height="30.0" rx="2.5"/>
+<rect class="tongue" x="92.5" y="58.0" width="55.0" height="10.0" rx="1.0"/>
+<rect class="contact" x="97.0" y="59.0" width="4.0" height="6.0" rx="0.0"/>
+<text class="pin" x="99.0" y="80.5" text-anchor="middle">1</text>
+<rect class="contact" x="111.0" y="59.0" width="4.0" height="6.0" rx="0.0"/>
+<text class="pin" x="113.0" y="80.5" text-anchor="middle">2</text>
+<rect class="contact" x="125.0" y="59.0" width="4.0" height="6.0" rx="0.0"/>
+<text class="pin" x="127.0" y="80.5" text-anchor="middle">3</text>
+<rect class="contact" x="139.0" y="59.0" width="4.0" height="6.0" rx="0.0"/>
+<text class="pin" x="141.0" y="80.5" text-anchor="middle">4</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">1 VBUS, 2 D-, 3 D+, 4 GND</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>USB-A, receptacle on the machine. Drawn at the shared scale.</figcaption></figure>
+  <h3>USB-A</h3>
+  <p class="systems">Xbox 360, PS3, PS4, Xbox One, Switch dock, PS5, Xbox Series, every PC since 1998</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>13 × 6 mm</dd></div>
+    <div><dt>Socket body</dt><dd>14 mm wide, 15 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 26.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>USB</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip no">no: hub port</span></dd></div>
+    <div><dt>Sourcing</dt><dd>catalogue part, single, stacked, right-angle or vertical</dd></div>
+  </dl>
+  <p class="note">A USB section is two of these wired to the backplane&#x27;s hub header. This is also what most retro-to-USB adapters end in.</p>
+</article>
+
+<article class="card" id="c-usb3a">
+  <figure><svg role="img" aria-label="USB 3.0 A, SNAC face, receptacle on the backplane" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="77.5" y="37.5" width="85.0" height="50.0" rx="5.0"/>
+<rect class="shell" x="87.5" y="47.5" width="65.0" height="30.0" rx="2.5"/>
+<rect class="tongue3" x="92.5" y="58.0" width="55.0" height="10.0" rx="1.0"/>
+<rect class="contact" x="97.0" y="59.0" width="4.0" height="6.0" rx="0.0"/>
+<text class="pin" x="99.0" y="80.5" text-anchor="middle">1</text>
+<rect class="contact" x="111.0" y="59.0" width="4.0" height="6.0" rx="0.0"/>
+<text class="pin" x="113.0" y="80.5" text-anchor="middle">2</text>
+<rect class="contact" x="125.0" y="59.0" width="4.0" height="6.0" rx="0.0"/>
+<text class="pin" x="127.0" y="80.5" text-anchor="middle">3</text>
+<rect class="contact" x="139.0" y="59.0" width="4.0" height="6.0" rx="0.0"/>
+<text class="pin" x="141.0" y="80.5" text-anchor="middle">4</text>
+<rect class="contact" x="92.2" y="49.5" width="3.5" height="7.0" rx="0.0"/>
+<text class="pin" x="94.0" y="44.5" text-anchor="middle">5</text>
+<rect class="contact" x="105.2" y="49.5" width="3.5" height="7.0" rx="0.0"/>
+<text class="pin" x="107.0" y="44.5" text-anchor="middle">6</text>
+<rect class="contact" x="118.2" y="49.5" width="3.5" height="7.0" rx="0.0"/>
+<text class="pin" x="120.0" y="44.5" text-anchor="middle">7</text>
+<rect class="contact" x="131.2" y="49.5" width="3.5" height="7.0" rx="0.0"/>
+<text class="pin" x="133.0" y="44.5" text-anchor="middle">8</text>
+<rect class="contact" x="144.2" y="49.5" width="3.5" height="7.0" rx="0.0"/>
+<text class="pin" x="146.0" y="44.5" text-anchor="middle">9</text>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">SNAC: 5 V on 1, GND on 4, IO on 8 2 7 3 6 5 9</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>USB 3.0 A, SNAC, receptacle on the backplane. Drawn at the shared scale.</figcaption></figure>
+  <h3>USB 3.0 A, SNAC</h3>
+  <p class="systems">MiSTer user port, blue212 SNAC and every SNAC console adapter</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>13 × 6 mm</dd></div>
+    <div><dt>Socket body</dt><dd>14 mm wide, 18 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 23.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>3.3 V open-drain over SNAC; 5 V power</dd></div>
+    <div><dt>Lines</dt><dd>7 IO in SNAC order</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip ok">it is the SNAC port</span></dd></div>
+    <div><dt>Sourcing</dt><dd>catalogue part</dd></div>
+  </dl>
+  <p class="note">Nine contacts: the four USB 2.0 ones plus five deeper SuperSpeed ones. SNAC uses seven of them as GPIO and VBUS/GND for power. Never plug a real USB device into a SNAC port.</p>
+</article>
+
+<article class="card" id="c-usbc">
+  <figure><svg role="img" aria-label="USB-C face, receptacle on the machine" viewBox="0 0 240.0 135.0" class="face">
+<rect class="flange" x="87.5" y="43.8" width="65.0" height="37.5" rx="5.0"/>
+<rect class="shell" x="97.5" y="53.8" width="45.0" height="17.5" rx="8.8"/>
+<rect class="tongue" x="103.5" y="60.8" width="33.0" height="3.5" rx="1.5"/>
+<text class="dim" x="232.5" y="130.0" text-anchor="end">24 contacts, reversible</text>
+<line class="bar" x1="7.5" y1="127.5" x2="57.5" y2="127.5"/>
+<text class="dim" x="61.5" y="130.0" text-anchor="start">10 mm</text>
+</svg><figcaption>USB-C, receptacle on the machine. Drawn at the shared scale.</figcaption></figure>
+  <h3>USB-C</h3>
+  <p class="systems">Switch, Switch 2, PS5 and Xbox Series pads, modern PCs</p>
+  <dl>
+    <div><dt>Plug opening</dt><dd>9 × 3.5 mm</dd></div>
+    <div><dt>Socket body</dt><dd>10 mm wide, 9 mm deep</dd></div>
+    <div><dt>Panel width</dt><dd>1 slot of 25 mm</dd></div>
+    <div><dt>80 mm cassette</dt><dd>fits, 32.8 mm spare</dd></div>
+    <div><dt>Logic</dt><dd>5 V</dd></div>
+    <div><dt>Lines</dt><dd>USB</dd></div>
+    <div><dt>Passive SNAC section</dt><dd><span class="chip no">no: hub port</span></dd></div>
+    <div><dt>Sourcing</dt><dd>catalogue part</dd></div>
+  </dl>
+  <p class="note">Only worth a front position for charging a pad; for input, a USB-A on the hub does the same.</p>
+</article>
+</div>
+<h3 style="margin-top:24px">Not drawn</h3>
+<ul class="plain">
+<li><strong>3DO (1993)</strong> one proprietary port on the console; pads daisy-chain. Shape and pin count not verified here.</li>
+<li><strong>Virtual Boy (1995)</strong> one proprietary port. Not verified.</li>
+<li><strong>ColecoVision (1982)</strong> DE-9 shell with a keypad matrix on the pins: more than seven lines, USB section.</li>
+<li><strong>Intellivision (1979)</strong> hard-wired pads on the original; not a port.</li>
+</ul>
+
+<h2>The systems</h2>
+<p>Chronological, consoles and the home computers and PCs people keep. Port counts are the machine's own; wireless-only generations are listed with their USB pad ports because a panel for them is just USB.</p>
+<div class="filters" role="group" aria-label="Filter systems">
+  <button id="f-all" aria-pressed="true" data-f="all">all</button>
+  <button id="f-console" aria-pressed="false" data-f="console">consoles</button>
+  <button id="f-computer" aria-pressed="false" data-f="computer">computers and PCs</button>
+</div>
+<div class="tablewrap">
+<table id="systems">
+<thead><tr><th>Year</th><th>System</th><th>Maker</th><th>Class</th><th>Controller port</th><th>Ports</th><th>Section</th><th>Notes</th></tr></thead>
+<tbody>
+<tr data-class="console"><td class="num">1977</td><td>Atari 2600</td><td class="muted">Atari</td><td>console</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">digital stick; paddles are analogue</td></tr>
+<tr data-class="computer"><td class="num">1979</td><td>Atari 400 / 800</td><td class="muted">Atari</td><td>computer</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">4</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">1982</td><td>Atari 5200</td><td class="muted">Atari</td><td>console</td><td><a href="#c-da15">DA-15, D-sub 15</a></td><td class="num">4</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">analogue stick, keypad</td></tr>
+<tr data-class="console"><td class="num">1982</td><td>ColecoVision</td><td class="muted">Coleco</td><td>console</td><td><a href="#c-de9">DE-9, D-sub 9</a> (Coleco pinout)</td><td class="num">2</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">keypad matrix</td></tr>
+<tr data-class="computer"><td class="num">1982</td><td>Commodore 64</td><td class="muted">Commodore</td><td>computer</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">C128 the same</td></tr>
+<tr data-class="console"><td class="num">1982</td><td>Vectrex</td><td class="muted">GCE</td><td>console</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">analogue stick on the original pad</td></tr>
+<tr data-class="console"><td class="num">1983</td><td>Famicom</td><td class="muted">Nintendo</td><td>console</td><td><a href="#c-da15">DA-15, D-sub 15</a> (expansion, female)</td><td class="num">1</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">pads hard-wired; port carries pad 3 and 4 signals</td></tr>
+<tr data-class="computer"><td class="num">1983</td><td>MSX</td><td class="muted">many</td><td>computer</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">Atari pinout</td></tr>
+<tr data-class="computer"><td class="num">1984</td><td>Amstrad CPC</td><td class="muted">Amstrad</td><td>computer</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">1</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">second stick chains through the first</td></tr>
+<tr data-class="computer"><td class="num">1984</td><td>IBM PC/AT and clones</td><td class="muted">IBM and clones</td><td>computer</td><td><a href="#c-da15">DA-15, D-sub 15</a> game port; <a href="#c-din5">DIN 5, 180°</a> keyboard</td><td class="num">1</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">analogue; MIDI on the same port</td></tr>
+<tr data-class="computer"><td class="num">1985</td><td>Amiga 1000 / 500 / 1200</td><td class="muted">Commodore</td><td>computer</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">mouse is quadrature on the same port</td></tr>
+<tr data-class="computer"><td class="num">1985</td><td>Atari ST</td><td class="muted">Atari</td><td>computer</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">STE adds two da15 enhanced ports (usb)</td></tr>
+<tr data-class="console"><td class="num">1985</td><td>Master System</td><td class="muted">Sega</td><td>console</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">1985</td><td>NES</td><td class="muted">Nintendo</td><td>console</td><td><a href="#c-nes">NES 7-pin</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted"></td></tr>
+<tr data-class="computer"><td class="num">1986</td><td>Apple IIGS</td><td class="muted">Apple</td><td>computer</td><td><a href="#c-de9">DE-9, D-sub 9</a> (analogue); <a href="#c-mdin4">mini-DIN 4, ADB</a> ADB</td><td class="num">1</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">analogue stick; ADB keyboard and mouse</td></tr>
+<tr data-class="console"><td class="num">1986</td><td>Atari 7800</td><td class="muted">Atari</td><td>console</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">two buttons on pins 5 and 9</td></tr>
+<tr data-class="computer"><td class="num">1986</td><td>BBC Master</td><td class="muted">Acorn</td><td>computer</td><td><a href="#c-da15">DA-15, D-sub 15</a> analogue</td><td class="num">1</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">analogue</td></tr>
+<tr data-class="computer"><td class="num">1986</td><td>ZX Spectrum +2 / +3</td><td class="muted">Amstrad</td><td>computer</td><td><a href="#c-de9">DE-9, D-sub 9</a> (Sinclair pinout)</td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">not Atari-compatible wiring</td></tr>
+<tr data-class="computer"><td class="num">1987</td><td>IBM PS/2</td><td class="muted">IBM</td><td>computer</td><td><a href="#c-mdin6">mini-DIN 6, PS/2</a></td><td class="num">2</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">keyboard and mouse</td></tr>
+<tr data-class="computer"><td class="num">1987</td><td>Macintosh SE / II</td><td class="muted">Apple</td><td>computer</td><td><a href="#c-mdin4">mini-DIN 4, ADB</a></td><td class="num">2</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">ADB until 1998</td></tr>
+<tr data-class="console"><td class="num">1987</td><td>PC Engine</td><td class="muted">NEC</td><td>console</td><td><a href="#c-mdin8">mini-DIN 8</a></td><td class="num">1</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">multitap for more</td></tr>
+<tr data-class="computer"><td class="num">1987</td><td>Sharp X68000</td><td class="muted">Sharp</td><td>computer</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">1988</td><td>Mega Drive / Genesis</td><td class="muted">Sega</td><td>console</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">seven lines exactly</td></tr>
+<tr data-class="computer"><td class="num">1989</td><td>FM Towns</td><td class="muted">Fujitsu</td><td>computer</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">1989</td><td>TurboGrafx-16</td><td class="muted">NEC</td><td>console</td><td><a href="#c-tg16">TurboGrafx-16 8-pin</a></td><td class="num">1</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">1990</td><td>Neo Geo AES</td><td class="muted">SNK</td><td>console</td><td><a href="#c-da15">DA-15, D-sub 15</a></td><td class="num">2</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">more than seven lines; Neo Geo CD the same</td></tr>
+<tr data-class="console"><td class="num">1990</td><td>Super Famicom / SNES</td><td class="muted">Nintendo</td><td>console</td><td><a href="#c-snes">SNES / SFC 7-pin</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">1991</td><td>CD-i</td><td class="muted">Philips</td><td>console</td><td><a href="#c-mdin8">mini-DIN 8</a></td><td class="num">1</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">serial pointer protocol</td></tr>
+<tr data-class="console"><td class="num">1992</td><td>Sega CD</td><td class="muted">Sega</td><td>console</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">uses the Genesis ports</td></tr>
+<tr data-class="console"><td class="num">1993</td><td>3DO</td><td class="muted">Panasonic and others</td><td>console</td><td>proprietary</td><td class="num">1</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">not verified</td></tr>
+<tr data-class="console"><td class="num">1993</td><td>Amiga CD32</td><td class="muted">Commodore</td><td>console</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">CD32 pad shifts extra buttons on the same pins</td></tr>
+<tr data-class="console"><td class="num">1993</td><td>Atari Jaguar</td><td class="muted">Atari</td><td>console</td><td><a href="#c-da15">DA-15, D-sub 15</a></td><td class="num">2</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">keypad matrix</td></tr>
+<tr data-class="console"><td class="num">1994</td><td>32X</td><td class="muted">Sega</td><td>console</td><td><a href="#c-de9">DE-9, D-sub 9</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">uses the Genesis ports</td></tr>
+<tr data-class="console"><td class="num">1994</td><td>PlayStation</td><td class="muted">Sony</td><td>console</td><td><a href="#c-psx">PlayStation 9-pin</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">3.3 V and 7.6 V on the section</td></tr>
+<tr data-class="console"><td class="num">1994</td><td>Saturn</td><td class="muted">Sega</td><td>console</td><td><a href="#c-saturn">Saturn 9-pin</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">1995</td><td>Virtual Boy</td><td class="muted">Nintendo</td><td>console</td><td>proprietary</td><td class="num">1</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">not verified</td></tr>
+<tr data-class="console"><td class="num">1996</td><td>Nintendo 64</td><td class="muted">Nintendo</td><td>console</td><td><a href="#c-n64">N64 3-pin</a></td><td class="num">4</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">four ports on one section</td></tr>
+<tr data-class="console"><td class="num">1998</td><td>Dreamcast</td><td class="muted">Sega</td><td>console</td><td><a href="#c-dc">Dreamcast</a></td><td class="num">4</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">Maple bus</td></tr>
+<tr data-class="computer"><td class="num">1998</td><td>iMac and USB PCs</td><td class="muted">Apple and others</td><td>computer</td><td><a href="#c-usba">USB-A</a></td><td class="num">2</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">everything after is USB</td></tr>
+<tr data-class="console"><td class="num">2000</td><td>PlayStation 2</td><td class="muted">Sony</td><td>console</td><td><a href="#c-psx">PlayStation 9-pin</a></td><td class="num">2</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">2001</td><td>GameCube</td><td class="muted">Nintendo</td><td>console</td><td><a href="#c-gc">GameCube</a></td><td class="num">4</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">2001</td><td>Xbox</td><td class="muted">Microsoft</td><td>console</td><td><a href="#c-xbox">Xbox (original)</a></td><td class="num">4</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">USB in a proprietary shell</td></tr>
+<tr data-class="console"><td class="num">2005</td><td>Xbox 360</td><td class="muted">Microsoft</td><td>console</td><td><a href="#c-usba">USB-A</a>; proprietary 2.4 GHz</td><td class="num">3</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted">wired pads are USB</td></tr>
+<tr data-class="console"><td class="num">2006</td><td>PlayStation 3</td><td class="muted">Sony</td><td>console</td><td><a href="#c-usba">USB-A</a>; Bluetooth</td><td class="num">4</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">2006</td><td>Wii</td><td class="muted">Nintendo</td><td>console</td><td><a href="#c-gc">GameCube</a>; Bluetooth</td><td class="num">4</td><td><span class="chip ok">passive, SNAC-style</span></td><td class="muted">GameCube ports on early units only</td></tr>
+<tr data-class="console"><td class="num">2012</td><td>Wii U</td><td class="muted">Nintendo</td><td>console</td><td><a href="#c-usba">USB-A</a>; Bluetooth</td><td class="num">4</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">2013</td><td>PlayStation 4</td><td class="muted">Sony</td><td>console</td><td><a href="#c-usba">USB-A</a>; Bluetooth</td><td class="num">2</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">2013</td><td>Xbox One</td><td class="muted">Microsoft</td><td>console</td><td><a href="#c-usba">USB-A</a>; proprietary wireless</td><td class="num">3</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">2017</td><td>Switch</td><td class="muted">Nintendo</td><td>console</td><td><a href="#c-usbc">USB-C</a>; <a href="#c-usba">USB-A</a> on dock; Bluetooth</td><td class="num">3</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">2020</td><td>PlayStation 5</td><td class="muted">Sony</td><td>console</td><td><a href="#c-usba">USB-A</a>; <a href="#c-usbc">USB-C</a>; Bluetooth</td><td class="num">4</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">2020</td><td>Xbox Series X / S</td><td class="muted">Microsoft</td><td>console</td><td><a href="#c-usba">USB-A</a>; proprietary wireless</td><td class="num">2</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted"></td></tr>
+<tr data-class="console"><td class="num">2025</td><td>Switch 2</td><td class="muted">Nintendo</td><td>console</td><td><a href="#c-usbc">USB-C</a>; Bluetooth</td><td class="num">2</td><td><span class="chip warn">USB section with MCU</span></td><td class="muted"></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>What this says for the panel</h2>
+<ul class="plain">
+  <li><strong>Seven passive sections cover the 8-bit and 16-bit world and Nintendo's 3.3 V buses:</strong> DE-9, NES, SNES, Saturn, PlayStation, N64, GameCube, plus Dreamcast and PC Engine if wanted. All are at most 25 mm deep and one or two slots wide.</li>
+  <li><strong>Three families need an MCU on the section:</strong> DA-15 machines (Neo Geo, Jaguar, 5200, the PC game port and its MIDI), keyboards and mice (PS/2, DIN 5, ADB), and analogue sticks (Apple II, BBC, 5200). They are USB sections on the hub.</li>
+  <li><strong>From the Xbox onward there is nothing to build:</strong> the port is USB or the pad is wireless. A two-slot USB section with four USB-A covers 2001 to 2026.</li>
+  <li><strong>Sourcing risk sits in six replacement-part sockets:</strong> NES, SNES, Saturn, PlayStation, N64, GameCube, plus Dreamcast and TurboGrafx if built. Everything else is a catalogue part. The SNAC segment covers any of them with a bought adapter until its module exists.</li>
+</ul>
+
+<p class="foot">Compiled from memory of nesdev, the MiSTer SNAC ecosystem, adapter firmware sources and console service manuals; nothing here was fetched or measured. The one verified fact is the SNAC channel-to-pin order, read from blue212's schematic. Generated by <span class="mono">docs/gen_port_atlas.py</span>; edit the tables there.</p>
+</div>
+<script>
+(function () {
+  var rows = document.querySelectorAll('#systems tbody tr');
+  var buttons = document.querySelectorAll('.filters button');
+  function apply(f) {
+    rows.forEach(function (r) { r.hidden = !(f === 'all' || r.dataset.class === f); });
+    buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.f === f)); });
+    try { localStorage.setItem('atlas-filter', f); } catch (e) {}
+  }
+  buttons.forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.f); }); });
+  var saved = null;
+  try { saved = localStorage.getItem('atlas-filter'); } catch (e) {}
+  if (saved === 'console' || saved === 'computer') apply(saved);
+})();
+</script>
